@@ -7,8 +7,18 @@ readme = "README.md"
 packages = [{include = "civil_ihu_pyappz"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
-
+python = "^3.10"
+notebook = "^6.5.2"
+jupyter = "^1.0.0"
+jupyterlab = "^3.5.0"
+openpyxl = "^3.0.10"
+lxml = "^4.9.1"
+seaborn = "^0.12.1"
+tables = "^3.7.0"
+streamlit = "^1.19.0"
+pandas = "2.0"
+docxtpl = "^0.16.6"
+docxcompose = "^1.4.0"
 
 [build-system]
 requires = ["poetry-core"]

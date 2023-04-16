@@ -6,12 +6,22 @@ from docx import Document
 from docx.enum.text import WD_BREAK
 from pathlib import Path
 
-st.write('Περιγράμματα μαθημάτων')
 
 
 def replace_none_with_empty_str(some_dict: dict) -> dict:
     return {k: ('' if v is None else v) for k, v in some_dict.items()}
 
+
+try:
+    with open('keys.json') as f:
+       data = json.load(f)
+       gsheet_perigrammata_id = data['gsheet_perigrammata']
+except:
+    pass
+
+
+
+st.markdown('## Περιγράμματα μαθημάτων')
 
 doc = DocxTemplate("Περιγράμματα-template-gr.docx")
 doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
@@ -39,6 +49,7 @@ df = load_gheet(lang)
 
 
 # df = pd.read_csv(url, dtype_backend='pyarrow')
+
 
 
 tab_table, tab_statistics, tab_download = st.tabs(
@@ -76,6 +87,6 @@ with tab_download:
         btn = st.download_button(
             label="Download file",
             data=file,
-            file_name="perigramma.docx",
+            file_name=f"perigramma_{docx_code}.docx",
             mime="document/docx"
         )
