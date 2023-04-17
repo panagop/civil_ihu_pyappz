@@ -69,11 +69,12 @@ with tab_download:
 
     row = df.iloc[row_index]
     row_dict = row.to_dict()
+    row_dict = replace_none_with_empty_str(row_dict)
 
     with st.expander("Περιγραφή μαθήματος"):
         st.write(row_dict)
 
-    row_dict = replace_none_with_empty_str(row_dict)
+    
     # doc.render(row_dict)
     # doc.save('gen/perigramma.docx')
 
