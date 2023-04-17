@@ -18,7 +18,7 @@ try:
        data = json.load(f)
        gsheet_perigrammata_id = data['gsheet_perigrammata']
 except:
-    pass
+    gsheet_perigrammata_id = st.secrets['gsheet_perigrammata_id']
 
 
 
