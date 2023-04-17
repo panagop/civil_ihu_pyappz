@@ -24,8 +24,11 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-doc = DocxTemplate("Περιγράμματα-template-gr.docx")
-doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
+try:
+    doc = DocxTemplate("Περιγράμματα-template-gr.docx")
+except:
+    doc = DocxTemplate("civil_ihu_pyappz\Περιγράμματα-template-gr.docx")
+# doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
 lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
 
