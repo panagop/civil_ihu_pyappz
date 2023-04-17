@@ -24,13 +24,7 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-try:
-    doc = DocxTemplate("Perigrammata-template-gr.docx")
-    st.markdown('# found file Περιγράμματα-template-gr.docx')
-except:
-    st.markdown('# using exception')
-    doc = DocxTemplate("civil_ihu_pyappz\Perigrammata-template-gr.docx")
-    st.markdown('# found file civil_ihu_pyappz\Περιγράμματα-template-gr.docx')
+doc = DocxTemplate("Perigrammata-template-gr.docx")
 # doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
 lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
@@ -80,7 +74,7 @@ with tab_download:
         st.write(row_dict)
 
     row_dict = replace_none_with_empty_str(row_dict)
-    doc.render(row_dict)
+    # doc.render(row_dict)
     # doc.save('gen/perigramma.docx')
 
     # with open('gen/perigramma.docx', "rb") as file:
