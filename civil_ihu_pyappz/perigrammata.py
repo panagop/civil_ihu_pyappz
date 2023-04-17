@@ -26,7 +26,7 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-with open('Perigrammata-template-gr.docx', 'rb') as f:
+with open(r'civil_ihu_pyappz\Perigrammata-template-gr.docx', 'rb') as f:
     bytes_io = io.BytesIO(f.read())
 doc = DocxTemplate(bytes_io)
 
