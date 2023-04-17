@@ -77,13 +77,13 @@ with tab_download:
         st.write(row_dict)
 
     row_dict = replace_none_with_empty_str(row_dict)
-    doc.render(row_dict)
-    doc.save('gen/perigramma.docx')
+    # doc.render(row_dict)
+    # doc.save('gen/perigramma.docx')
 
-    with open('gen/perigramma.docx', "rb") as file:
-        btn = st.download_button(
-            label="Download file",
-            data=file,
-            file_name=f"perigramma_{docx_code}.docx",
-            mime="document/docx"
-        )
+    # with open('gen/perigramma.docx', "rb") as file:
+    #     btn = st.download_button(
+    #         label="Download file",
+    #         data=file,
+    #         file_name=f"perigramma_{docx_code}.docx",
+    #         mime="document/docx"
+    #     )
