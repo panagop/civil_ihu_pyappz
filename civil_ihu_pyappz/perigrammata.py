@@ -11,51 +11,58 @@ import io
 import requests
 
 
-
 def replace_none_with_empty_str(some_dict: dict) -> dict:
     return {k: ('' if v is None else v) for k, v in some_dict.items()}
 
 
 try:
     with open('keys.json') as f:
-       data = json.load(f)
-       gsheet_perigrammata_id = data['gsheet_perigrammata']
+        data = json.load(f)
+        gsheet_perigrammata_id = data['gsheet_perigrammata']
 except:
     gsheet_perigrammata_id = st.secrets['gsheet_perigrammata_id']
-
 
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
 url = r"https://github.com/panagop/civil_ihu_pyappz/raw/daf2ec082269559dcc28c8675b0a55178fd3b122/civil_ihu_pyappz/Perigrammata-template-gr.docx"
-response = requests.get(url)
+response = requests.get(url, timeout=5)
 bytes_io = io.BytesIO(response.content)
 
 doc = DocxTemplate(bytes_io)
 
 
-# doc = DocxTemplate("Perigrammata-template-gr.docx")
-# doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
-
-st.write(doc.undeclared_template_variables)
-
 lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
 
 
 @st.cache_data
-def load_gheet(lang):
+def load_gheet(lang: str) -> pd.DataFrame:
     sheet_id = gsheet_perigrammata_id
     if lang == "Ελληνικά":
         sheet_name = "gr"
     else:
         sheet_name = "eng"
-    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+    url = fr"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     df = pd.read_csv(url, dtype_backend='pyarrow', index_col=0)
     return df
 
 
-df = load_gheet(lang)
+# @st.cache_data
+# def load_template(lang: str) -> DocxTemplate:
+#     if lang == "Ελληνικά":
+#         url = r"https://github.com/panagop/civil_ihu_pyappz/raw/daf2ec082269559dcc28c8675b0a55178fd3b122/civil_ihu_pyappz/Perigrammata-template-gr.docx"
+#     else:
+#         url = r"https://github.com/panagop/civil_ihu_pyappz/raw/daf2ec082269559dcc28c8675b0a55178fd3b122/civil_ihu_pyappz/Perigrammata-template-gr.docx"
+#     response = requests.get(url, timeout=5)
+#     bytes_io = io.BytesIO(response.content)
+#     _doc = DocxTemplate(bytes_io)
+#     return _doc
 
+
+df = load_gheet(lang)
+# doc = load_template(lang)
+
+st.write(doc.undeclared_template_variables)
 
 
 tab_table, tab_statistics, tab_download = st.tabs(
@@ -74,10 +81,11 @@ with tab_statistics:
 with tab_download:
 
     docx_examino = st.selectbox("Επιλέξτε εξάμηνο", df['examino'].unique())
-    docx_code = st.selectbox("Επιλέξτε κωδικό μαθήματος", df[df['examino'] == docx_examino]['code'].unique())
+    docx_code = st.selectbox("Επιλέξτε κωδικό μαθήματος",
+                             df[df['examino'] == docx_examino]['code'].unique())
 
-    row_index = df[(df['examino'] == docx_examino) & (df['code'] == docx_code)].index[0]-1
-
+    row_index = df[(df['examino'] == docx_examino) &
+                   (df['code'] == docx_code)].index[0]-1
 
     row = df.iloc[row_index]
     row_dict = row.to_dict()
@@ -86,18 +94,17 @@ with tab_download:
     with st.expander("Στοιχεία μαθήματος (πλήρη)"):
         st.write(row_dict)
 
-    
     doc.render(row_dict)
+    buffer = io.BytesIO()
+    doc.save(buffer)
     # doc.save('gen/perigramma.docx')
 
-    # with open('gen/perigramma.docx', "rb") as file:
-    #     btn = st.download_button(
-    #         label="Download file",
-    #         data=file,
-    #         file_name=f"perigramma_{docx_code}.docx",
-    #         mime="document/docx"
-    #     )
-
+    btn = st.download_button(
+        label="Download file",
+        data=buffer.getvalue(),
+        file_name=f"perigramma_{docx_code}.docx",
+        mime="document/docx"
+    )
 
 
 # from io import BytesIO
