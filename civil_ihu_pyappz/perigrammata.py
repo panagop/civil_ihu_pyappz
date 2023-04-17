@@ -62,7 +62,7 @@ def load_gheet(lang: str) -> pd.DataFrame:
 df = load_gheet(lang)
 # doc = load_template(lang)
 
-st.write(doc.undeclared_template_variables)
+# st.write(doc.undeclared_template_variables)
 
 
 tab_table, tab_statistics, tab_download = st.tabs(
