@@ -27,6 +27,8 @@ st.markdown('## Περιγράμματα μαθημάτων')
 doc = DocxTemplate("Perigrammata-template-gr.docx")
 # doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
+st.write(doc.undeclared_template_variables)
+
 lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
 
 
