@@ -24,10 +24,10 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-try:
-    doc = DocxTemplate("Περιγράμματα-template-gr.docx")
-except:
-    doc = DocxTemplate("civil_ihu_pyappz\Περιγράμματα-template-gr.docx")
+# try:
+#     doc = DocxTemplate("Περιγράμματα-template-gr.docx")
+# except:
+#     doc = DocxTemplate("civil_ihu_pyappz\Περιγράμματα-template-gr.docx")
 # doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
 lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
@@ -35,7 +35,7 @@ lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
 
 @st.cache_data
 def load_gheet(lang):
-    sheet_id = "1qOLxB2BNYvTLiTxofUSJCUVd7JIdkcflPTcR_FLub5k"
+    sheet_id = gsheet_perigrammata_id
     if lang == "Ελληνικά":
         sheet_name = "gr"
     else:
