@@ -20,6 +20,7 @@ pandas = "2.0"
 docxtpl = "^0.16.6"
 docxcompose = "^1.4.0"
 docx = "^0.2.4"
+python-docx = "^0.8.11"
 
 [build-system]
 requires = ["poetry-core"]

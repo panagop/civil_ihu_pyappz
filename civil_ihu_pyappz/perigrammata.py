@@ -5,6 +5,7 @@ from docxcompose.composer import Composer
 from docx import Document
 from docx.enum.text import WD_BREAK
 from pathlib import Path
+import json
 
 
 
@@ -42,13 +43,6 @@ def load_gheet(lang):
 
 
 df = load_gheet(lang)
-
-# sheet_id = "1qOLxB2BNYvTLiTxofUSJCUVd7JIdkcflPTcR_FLub5k"
-# sheet_name = "gr"
-# url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-
-
-# df = pd.read_csv(url, dtype_backend='pyarrow')
 
 
 
