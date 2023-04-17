@@ -7,6 +7,8 @@ from docxtpl import DocxTemplate
 from pathlib import Path
 import json
 
+import io
+
 
 
 def replace_none_with_empty_str(some_dict: dict) -> dict:
@@ -24,7 +26,12 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-doc = DocxTemplate("Perigrammata-template-gr.docx")
+with open('Perigrammata-template-gr.docx', 'rb') as f:
+    bytes_io = io.BytesIO(f.read())
+doc = DocxTemplate(bytes_io)
+
+
+# doc = DocxTemplate("Perigrammata-template-gr.docx")
 # doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
 st.write(doc.undeclared_template_variables)
