@@ -77,7 +77,7 @@ with tab_download:
         st.write(row_dict)
 
     row_dict = replace_none_with_empty_str(row_dict)
-    # doc.render(row_dict)
+    doc.render(row_dict)
     # doc.save('gen/perigramma.docx')
 
     # with open('gen/perigramma.docx', "rb") as file:
