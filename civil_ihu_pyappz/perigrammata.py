@@ -1,9 +1,9 @@
 ﻿import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
-from docxcompose.composer import Composer
-from docx import Document
-from docx.enum.text import WD_BREAK
+# from docxcompose.composer import Composer
+# from docx import Document
+# from docx.enum.text import WD_BREAK
 from pathlib import Path
 import json
 
@@ -87,3 +87,22 @@ with tab_download:
     #         file_name=f"perigramma_{docx_code}.docx",
     #         mime="document/docx"
     #     )
+
+
+
+# from io import BytesIO
+# from docxtpl import DocxTemplate
+
+# # Load the template file
+# template = DocxTemplate('my_template.docx')
+
+# # Render the template
+# context = {'name': 'John Smith'}
+# document = template.render(context)
+
+# # Save the document to a BytesIO buffer
+# buffer = BytesIO()
+# document.save(buffer)
+
+# # Get the binary data from the buffer
+# binary_data = buffer.getvalue()
