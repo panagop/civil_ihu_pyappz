@@ -26,8 +26,11 @@ st.markdown('## Περιγράμματα μαθημάτων')
 
 try:
     doc = DocxTemplate("Περιγράμματα-template-gr.docx")
+    st.markdown('# found file Περιγράμματα-template-gr.docx')
 except:
+    st.markdown('# using exception')
     doc = DocxTemplate("civil_ihu_pyappz\Περιγράμματα-template-gr.docx")
+    st.markdown('# found file civil_ihu_pyappz\Περιγράμματα-template-gr.docx')
 # doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
 lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
