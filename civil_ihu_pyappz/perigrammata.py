@@ -71,11 +71,11 @@ with tab_download:
     row_dict = row.to_dict()
     row_dict = replace_none_with_empty_str(row_dict)
 
-    with st.expander("Περιγραφή μαθήματος"):
+    with st.expander("Στοιχεία μαθήματος (πλήρη)"):
         st.write(row_dict)
 
     
-    # doc.render(row_dict)
+    doc.render(row_dict)
     # doc.save('gen/perigramma.docx')
 
     # with open('gen/perigramma.docx', "rb") as file:
