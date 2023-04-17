@@ -25,11 +25,11 @@ except:
 st.markdown('## Περιγράμματα μαθημάτων')
 
 try:
-    doc = DocxTemplate("Περιγράμματα-template-gr.docx")
+    doc = DocxTemplate("Perigrammata-template-gr.docx")
     st.markdown('# found file Περιγράμματα-template-gr.docx')
 except:
     st.markdown('# using exception')
-    doc = DocxTemplate("civil_ihu_pyappz\Περιγράμματα-template-gr.docx")
+    doc = DocxTemplate("civil_ihu_pyappz\Perigrammata-template-gr.docx")
     st.markdown('# found file civil_ihu_pyappz\Περιγράμματα-template-gr.docx')
 # doc_examino = DocxTemplate("Εξάμηνο-template-gr.docx")
 
