@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 
 import io
+import requests
 
 
 
@@ -26,8 +27,10 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-with open(r'https://github.com/panagop/civil_ihu_pyappz/blob/daf2ec082269559dcc28c8675b0a55178fd3b122/civil_ihu_pyappz/Perigrammata-template-gr.docx', 'rb') as f:
-    bytes_io = io.BytesIO(f.read())
+url = r"https://github.com/panagop/civil_ihu_pyappz/raw/daf2ec082269559dcc28c8675b0a55178fd3b122/civil_ihu_pyappz/Perigrammata-template-gr.docx"
+response = requests.get(url)
+bytes_io = io.BytesIO(response.content)
+
 doc = DocxTemplate(bytes_io)
 
 
