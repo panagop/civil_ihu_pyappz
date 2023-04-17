@@ -21,6 +21,9 @@ docxtpl = "^0.16.6"
 docxcompose = "^1.4.0"
 python-docx = "^0.8.11"
 
+[tool.poetry.group.dev.dependencies]
+autopep8 = "^2.0.2"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
