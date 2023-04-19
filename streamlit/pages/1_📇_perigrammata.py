@@ -25,14 +25,19 @@ except:
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
-url = r"https://github.com/panagop/civil_ihu_pyappz/raw/daf2ec082269559dcc28c8675b0a55178fd3b122/civil_ihu_pyappz/Perigrammata-template-gr.docx"
+lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
+
+
+if lang == "Ελληνικά":
+    url = r"https://github.com/panagop/civil_ihu_pyappz/raw/main/files/perigrammata-template-gr.docx"
+else:
+    url = r"https://github.com/panagop/civil_ihu_pyappz/raw/main/files/perigrammata-template-eng.docx"
+
 response = requests.get(url, timeout=5)
 bytes_io = io.BytesIO(response.content)
 
 doc = DocxTemplate(bytes_io)
 
-
-lang = st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"))
 
 
 @st.cache_data
