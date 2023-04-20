@@ -73,8 +73,16 @@ df = load_gsheet(lang)
 tab_table, tab_statistics, tab_download = st.tabs(
     ["Πίνακας", "Στατιστικά", "Αρχείο word"])
 
+
+def reload():
+    st.cache_data.clear()
+    df = load_gsheet(lang)
+    
+
 with tab_table:
     st.write(df)
+
+    st.button('Ενημέρωση από Google Sheets', on_click=reload)
 
 with tab_statistics:
     st.markdown('### Αριθμός μαθημάτων ανά εξάμηνο')
