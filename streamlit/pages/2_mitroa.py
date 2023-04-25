@@ -29,8 +29,8 @@ df_eklektores = load_gsheet('eklektores')
 df_antikeimena = load_gsheet('antikeimena')
 
 
-tab_table_eklektores, tab_table_antikeimena, tab_statistics = st.tabs(
-    ["Πίνακας εκλεκτόρων", "Πίνακας αντικειμένων", "Στατιστικά"])
+tab_table_eklektores, tab_table_antikeimena, tab_statistics, tab_reports = st.tabs(
+    ["Πίνακας εκλεκτόρων", "Πίνακας αντικειμένων", "Στατιστικά", "Εξαγωγή αναφορών"])
 
 with tab_table_eklektores:
     st.markdown('### Εκλεκτορες')
@@ -46,3 +46,11 @@ with tab_statistics:
 
     st.markdown('### Φορέας')
     st.bar_chart(df_eklektores['Φορέας Χρήστη'].value_counts())
+
+    st.markdown('### Βαθμίδα')
+    st.bar_chart(df_eklektores['Βαθμίδα'].value_counts())
+
+    st.markdown('### Επιστημονικό πεδίο')
+    st.bar_chart(df_antikeimena['Επιστημονικό πεδίο'].value_counts())
+
+    
