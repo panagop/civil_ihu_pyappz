@@ -53,4 +53,8 @@ with tab_statistics:
     st.markdown('### Επιστημονικό πεδίο')
     st.bar_chart(df_antikeimena['Επιστημονικό πεδίο'].value_counts())
 
+with tab_reports:
+    selected_antikeimeno = st.selectbox('Επιλογή αντικειμένου', df_antikeimena['Γνωστικό αντικείμενο'].unique())
+
     
+
