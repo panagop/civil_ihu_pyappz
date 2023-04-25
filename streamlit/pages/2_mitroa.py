@@ -12,7 +12,7 @@ try:
         data = json.load(f)
         gsheet_mitroa_id = data['gsheet_mitroa']
 except:
-    gsheet_mitroa_id = st.secrets['gsheet_mitroa']
+    gsheet_mitroa_id = st.secrets['gsheet_mitroa_id']
 
 
 st.markdown('## Μητρώα γνωστικών αντικειμένων')
