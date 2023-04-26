@@ -78,11 +78,13 @@ def reload():
     st.cache_data.clear()
     df = load_gsheet(lang)
     
+st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload)
+
 
 with tab_table:
     st.write(df)
 
-    st.button('Ενημέρωση από Google Sheets', on_click=reload)
+    
 
 with tab_statistics:
     st.markdown('### Αριθμός μαθημάτων ανά εξάμηνο')

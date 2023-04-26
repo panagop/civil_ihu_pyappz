@@ -27,6 +27,7 @@ def load_gsheet(sheet_name) -> pd.DataFrame:
     return df
 
 def reload():
+    st.cache_data.clear()
     df_eklektores = load_gsheet('eklektores')
     df_antikeimena = load_gsheet('antikeimena')
 
