@@ -26,9 +26,14 @@ def load_gsheet(sheet_name) -> pd.DataFrame:
     df = pd.read_csv(url, dtype_backend='pyarrow', index_col=0)
     return df
 
+def reload():
+    df_eklektores = load_gsheet('eklektores')
+    df_antikeimena = load_gsheet('antikeimena')
 
 df_eklektores = load_gsheet('eklektores')
 df_antikeimena = load_gsheet('antikeimena')
+
+st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload)
 
 df_antikeimena['Εξωτερικοί Ιδίου'] = df_antikeimena['Εξωτερικοί Ιδίου'].fillna('')
 
@@ -98,3 +103,4 @@ with tab_reports:
         data=buffer.getvalue(),
         file_name=f"{selected_antikeimeno}.xlsx"
     )
+
