@@ -20,6 +20,7 @@ pandas = "2.0.1"
 docxtpl = "^0.16.6"
 docxcompose = "^1.4.0"
 python-docx = "^0.8.11"
+docx2pdf = "^0.1.8"
 
 [tool.poetry.group.dev.dependencies]
 autopep8 = "^2.0.2"
