@@ -8,13 +8,14 @@ import io
 import requests
 
 
+# Load Google Sheets ID from secrets
 try:
-    with open('../files/keys.json') as f:
-    # path is relative to app.py, not this file
-        data = json.load(f)
-        gsheet_mitroa_id = data['gsheet_mitroa']
-except:
     gsheet_mitroa_id = st.secrets['gsheet_mitroa_id']
+except Exception as e:
+    st.error(f"Error loading Google Sheets ID from secrets: {e}")
+    st.error("Make sure you have a .streamlit/secrets.toml file with "
+             "gsheet_mitroa_id configured")
+    st.stop()
 
 
 st.markdown('## Μητρώα γνωστικών αντικειμένων')

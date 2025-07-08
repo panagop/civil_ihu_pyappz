@@ -1,8 +1,6 @@
 ﻿import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
-from pathlib import Path
-import json
 import io
 import requests
 
@@ -26,7 +24,7 @@ def load_gsheet(lang: str) -> pd.DataFrame:
 
 def reload_data():
     st.cache_data.clear()
-    df = load_gsheet(st.session_state['lang'])
+
 
 st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload_data)
 
@@ -35,13 +33,14 @@ def replace_none_with_empty_str(some_dict: dict) -> dict:
     return {k: ('' if v is None else v) for k, v in some_dict.items()}
 
 
+# Load Google Sheets ID from secrets
 try:
-    with open('../files/keys.json') as f:
-        # path is relative to app.py, not this file
-        data = json.load(f)
-        gsheet_perigrammata_id = data['gsheet_perigrammata']
-except:
     gsheet_perigrammata_id = st.secrets['gsheet_perigrammata_id']
+except Exception as e:
+    st.error(f"Error loading Google Sheets ID from secrets: {e}")
+    st.error("Make sure you have a .streamlit/secrets.toml file with "
+             "gsheet_perigrammata_id configured")
+    st.stop()
 
 st.markdown('## Περιγράμματα μαθημάτων')
 
