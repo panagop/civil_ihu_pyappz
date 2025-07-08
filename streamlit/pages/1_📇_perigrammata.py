@@ -23,7 +23,36 @@ def load_gsheet(lang: str) -> pd.DataFrame:
 
 
 def reload_data():
+    """Clear cache and reload data from Google Sheets"""
     st.cache_data.clear()
+    # Force reload by clearing session state data flags
+    if 'perigrammata_data_loaded' in st.session_state:
+        del st.session_state['perigrammata_data_loaded']
+    # Set a flag to indicate reload was requested
+    st.session_state['perigrammata_reload_requested'] = True
+
+
+def load_data():
+    """Load data with session state management"""
+    # Check if reload was requested
+    if st.session_state.get('perigrammata_reload_requested', False):
+        st.session_state['perigrammata_reload_requested'] = False
+        if 'perigrammata_data_loaded' in st.session_state:
+            del st.session_state['perigrammata_data_loaded']
+    
+    if 'perigrammata_data_loaded' not in st.session_state:
+        st.session_state['df_perigrammata'] = load_gsheet(
+            st.session_state['lang'])
+        st.session_state['perigrammata_data_loaded'] = True
+    
+    # Check if language changed and reload if needed
+    current_lang = st.session_state['lang']
+    if (st.session_state.get('last_lang') != current_lang or
+            'df_perigrammata' not in st.session_state):
+        st.session_state['df_perigrammata'] = load_gsheet(current_lang)
+        st.session_state['last_lang'] = current_lang
+    
+    return st.session_state['df_perigrammata']
 
 
 st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload_data)
@@ -45,10 +74,11 @@ except Exception as e:
 st.markdown('## Περιγράμματα μαθημάτων')
 
 st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"),
-                key='lang', on_change=reload_data)
+          key='lang', on_change=reload_data)
 
 
-df = load_gsheet(st.session_state['lang'])
+# Load data using the improved function
+df = load_data()
 
 # st.write(doc.undeclared_template_variables)
 
@@ -93,10 +123,15 @@ with tab_word_download:
     course_code = st.selectbox("Επιλέξτε κωδικό μαθήματος",
                              df[df['examino'] == course_examino]['code'].unique())
 
-    row_index = df[(df['examino'] == course_examino) &
-                   (df['code'] == course_code)].index[0]-1
-
-    row = df.iloc[row_index]
+    # Find the matching row directly using boolean indexing
+    matching_rows = df[(df['examino'] == course_examino) &
+                       (df['code'] == course_code)]
+    
+    if len(matching_rows) > 0:
+        row = matching_rows.iloc[0]
+    else:
+        st.error("No matching course found!")
+        st.stop()
     row_dict = row.to_dict()
     row_dict = replace_none_with_empty_str(row_dict)
 

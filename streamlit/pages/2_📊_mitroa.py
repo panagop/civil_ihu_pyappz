@@ -1,11 +1,8 @@
 ﻿import streamlit as st
 import pandas as pd
-import json
-import pyarrow as pa
 import numpy as np
-
 import io
-import requests
+
 
 
 # Load Google Sheets ID from secrets
@@ -27,13 +24,36 @@ def load_gsheet(sheet_name) -> pd.DataFrame:
     df = pd.read_csv(url, dtype_backend='pyarrow', index_col=0)
     return df
 
-def reload():
-    st.cache_data.clear()
-    df_eklektores = load_gsheet('eklektores')
-    df_antikeimena = load_gsheet('antikeimena')
 
-df_eklektores = load_gsheet('eklektores')
-df_antikeimena = load_gsheet('antikeimena')
+def reload():
+    """Clear cache and reload data from Google Sheets"""
+    st.cache_data.clear()
+    # Force reload by clearing session state data flags
+    if 'data_loaded' in st.session_state:
+        del st.session_state['data_loaded']
+    # Set a flag to indicate reload was requested
+    st.session_state['reload_requested'] = True
+
+
+def load_data():
+    """Load data with session state management"""
+    # Check if reload was requested
+    if st.session_state.get('reload_requested', False):
+        st.session_state['reload_requested'] = False
+        if 'data_loaded' in st.session_state:
+            del st.session_state['data_loaded']
+    
+    if 'data_loaded' not in st.session_state:
+        st.session_state['df_eklektores'] = load_gsheet('eklektores')
+        st.session_state['df_antikeimena'] = load_gsheet('antikeimena')
+        st.session_state['data_loaded'] = True
+    
+    return (st.session_state['df_eklektores'],
+            st.session_state['df_antikeimena'])
+
+
+# Load data using the improved function
+df_eklektores, df_antikeimena = load_data()
 
 st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload)
 
