@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 import io
 
+st.set_page_config(
+    layout="wide",
+)
+
 # Load Google Sheets ID from secrets
 try:
     gsheet_mitroa_id = st.secrets['gsheet_mitroa_id']

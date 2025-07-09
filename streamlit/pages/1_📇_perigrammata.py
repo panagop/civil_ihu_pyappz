@@ -4,6 +4,10 @@ from docxtpl import DocxTemplate
 import io
 import requests
 
+st.set_page_config(
+    layout="wide",
+)
+
 # Session state
 if 'lang' not in st.session_state:
     st.session_state['lang'] = 'Ελληνικά'
