@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 import io
 
-
-
 # Load Google Sheets ID from secrets
 try:
     gsheet_mitroa_id = st.secrets['gsheet_mitroa_id']
@@ -14,8 +12,8 @@ except Exception as e:
              "gsheet_mitroa_id configured")
     st.stop()
 
-
 st.markdown('## Μητρώα γνωστικών αντικειμένων')
+
 
 @st.cache_data
 def load_gsheet(sheet_name) -> pd.DataFrame:
@@ -26,34 +24,19 @@ def load_gsheet(sheet_name) -> pd.DataFrame:
 
 
 def reload():
-    """Clear cache and reload data from Google Sheets"""
+    """Clear cache to force reload from Google Sheets"""
     st.cache_data.clear()
-    # Force reload by clearing session state data flags
-    if 'data_loaded' in st.session_state:
-        del st.session_state['data_loaded']
-    # Set a flag to indicate reload was requested
-    st.session_state['reload_requested'] = True
 
 
-def load_data():
-    """Load data with session state management"""
-    # Check if reload was requested
-    if st.session_state.get('reload_requested', False):
-        st.session_state['reload_requested'] = False
-        if 'data_loaded' in st.session_state:
-            del st.session_state['data_loaded']
-    
-    if 'data_loaded' not in st.session_state:
-        st.session_state['df_eklektores'] = load_gsheet('eklektores')
-        st.session_state['df_antikeimena'] = load_gsheet('antikeimena')
-        st.session_state['data_loaded'] = True
-    
-    return (st.session_state['df_eklektores'],
-            st.session_state['df_antikeimena'])
+def get_data():
+    """Get current data from both sheets"""
+    df_eklektores = load_gsheet('eklektores')
+    df_antikeimena = load_gsheet('antikeimena')
+    return df_eklektores, df_antikeimena
 
 
-# Load data using the improved function
-df_eklektores, df_antikeimena = load_data()
+# Load data
+df_eklektores, df_antikeimena = get_data()
 
 st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload)
 
