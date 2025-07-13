@@ -12,13 +12,18 @@ st.set_page_config(
 if 'lang' not in st.session_state:
     st.session_state['lang'] = 'Ελληνικά'
 
+if 'programma_spoudon' not in st.session_state:
+    st.session_state['programma_spoudon'] = 'Προγραμμα σπουδών 2025'
 
 # Load data from google sheets
 @st.cache_data
-def load_gsheet(lang: str) -> pd.DataFrame:
+def load_gsheet(lang: str, programma_spoudon: str) -> pd.DataFrame:
     sheet_id = gsheet_perigrammata_id
     if lang == "Ελληνικά":
-        sheet_name = "gr_2025"
+        if programma_spoudon == "Προγραμμα σπουδών 2025":
+            sheet_name = "gr_2025"
+        else:
+            sheet_name = "gr"
     else:
         sheet_name = "eng"
     url = fr"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
@@ -33,7 +38,7 @@ def reload_data():
 
 def get_data():
     """Get current data based on selected language"""
-    return load_gsheet(st.session_state['lang'])
+    return load_gsheet(st.session_state['lang'], st.session_state['programma_spoudon'])
 
 
 st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload_data)
@@ -56,6 +61,10 @@ st.markdown('## Περιγράμματα μαθημάτων')
 
 st.radio("Γλώσσα", ("Ελληνικά", "Αγγλικά"),
          key='lang', on_change=reload_data)
+
+st.radio("Πρόγραμμα σπουδών", ("Προγραμμα σπουδών 2025", "Προγραμμα σπουδών 2018"),
+         key='programma_spoudon', on_change=reload_data)
+
 
 # Load data based on current language
 df = get_data()
