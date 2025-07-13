@@ -18,7 +18,7 @@ if 'lang' not in st.session_state:
 def load_gsheet(lang: str) -> pd.DataFrame:
     sheet_id = gsheet_perigrammata_id
     if lang == "Ελληνικά":
-        sheet_name = "gr"
+        sheet_name = "gr_2025"
     else:
         sheet_name = "eng"
     url = fr"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
