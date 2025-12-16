@@ -1,0 +1,88 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:ics.py - http://git.io/lLljaA
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Τεχνολογία Δομικών Υλικών Ι\nΚωδικός: ΔΟΜ002\nΕξάμηνο: 1\nΔιδάσκων: Φαναραδέλλη
+DTEND:20250902T110000Z
+DTSTART:20250902T090000Z
+SUMMARY:Τεχνολογία Δομικών Υλικών Ι (Εξάμ. 1)
+UID:334e6956-77bd-4257-ac8e-eb2039170c85@334e.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Γραμμική Άλγεβρα και Αναλυτική Γεωμετρία\nΚωδικός: ΓΕΝ002\nΕξάμηνο: 1\nΔιδάσκων: Παπαϊωάννου
+DTEND:20250909T200000Z
+DTSTART:20250909T180000Z
+SUMMARY:Γραμμική Άλγεβρα και Αναλυτική Γεωμετρία (Εξάμ. 1)
+UID:e80e2872-d7b2-458e-bbfc-d01e0469b395@e80e.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Απειροστικός Λογισμός ΙΙ\nΚωδικός: ΓΕΝ004\nΕξάμηνο: 2\nΔιδάσκων: Παπαϊωάννου
+DTEND:20250908T140000Z
+DTSTART:20250908T120000Z
+SUMMARY:Απειροστικός Λογισμός ΙΙ (Εξάμ. 2)
+UID:c34e1cd7-b000-4257-94e2-fd1f57052b6d@c34e.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Γεωδαισία ΙΙ\nΚωδικός: ΣΥΓ002\nΕξάμηνο: 2\nΔιδάσκων: Καλαμάκης
+DTEND:20250912T110000Z
+DTSTART:20250912T090000Z
+SUMMARY:Γεωδαισία ΙΙ (Εξάμ. 2)
+UID:75de073c-f166-4901-8dd9-8ecfa62f4643@75de.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Βασικά εργαλεία πληροφορικής - Συγγραφής επιστημονικών κειμένων\nΚωδικός: ΓΕΝ009\nΕξάμηνο: 1\nΔιδάσκων: Βλαχονάσιου
+DTEND:20250902T110000Z
+DTSTART:20250902T090000Z
+SUMMARY:Βασικά εργαλεία πληροφορικής - Συγγραφής επιστημονικών κειμένων (Εξάμ. 1)
+UID:b42ebdf5-7e65-4556-a7f2-49ba22215a6d@b42e.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Απειροστικός Λογισμός Ι\nΚωδικός: ΓΕΝ001\nΕξάμηνο: 1\nΔιδάσκων: Παπαϊωάννου
+DTEND:20250905T200000Z
+DTSTART:20250905T180000Z
+SUMMARY:Απειροστικός Λογισμός Ι (Εξάμ. 1)
+UID:85bc6b42-8f75-4361-a881-17ac0495049a@85bc.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Τεχνικό Σχέδιο\nΚωδικός: ΔΟΜ001\nΕξάμηνο: 1\nΔιδάσκων: Βλαχονάσιου
+DTEND:20250911T113000Z
+DTSTART:20250911T093000Z
+SUMMARY:Τεχνικό Σχέδιο (Εξάμ. 1)
+UID:5bc083ca-d5df-45d1-9744-a606ee4540b7@5bc0.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Τεχνική Μηχανική Ι\nΚωδικός: ΔΟΜ004\nΕξάμηνο: 2\nΔιδάσκων: Κολιόπουλος
+DTEND:20250901T140000Z
+DTSTART:20250901T120000Z
+SUMMARY:Τεχνική Μηχανική Ι (Εξάμ. 2)
+UID:8d9a3dc4-4212-441e-9abe-acef5cb8605c@8d9a.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Γεωδαισία Ι\nΚωδικός: ΣΥΓ001\nΕξάμηνο: 1\nΔιδάσκων: Καλαμάκης
+DTEND:20250917T140000Z
+DTSTART:20250917T120000Z
+SUMMARY:Γεωδαισία Ι (Εξάμ. 1)
+UID:9dd3b221-f00b-45d6-aeb1-080a19cd6414@9dd3.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Πιθανότητες και Στατιστική\nΚωδικός: ΓΕΝ005\nΕξάμηνο: 2\nΔιδάσκων: Σαφούρη
+DTEND:20250916T200000Z
+DTSTART:20250916T180000Z
+SUMMARY:Πιθανότητες και Στατιστική (Εξάμ. 2)
+UID:fa3562af-c613-47a3-8f07-28bfa4f145ab@fa35.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Οικοδομικό Σχέδιο με Η/Υ\nΚωδικός: ΔΟΜ003\nΕξάμηνο: 2\nΔιδάσκων: Βλαχονάσιου
+DTEND:20250919T140000Z
+DTSTART:20250919T120000Z
+SUMMARY:Οικοδομικό Σχέδιο με Η/Υ (Εξάμ. 2)
+UID:4372a25c-70ee-45c5-bda5-7a9c794e4740@4372.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Μάθημα: Φυσική για Μηχανικούς\nΚωδικός: ΓΕΝ003\nΕξάμηνο: 1\nΔιδάσκων: Βοζίκης
+DTEND:20250916T140000Z
+DTSTART:20250916T120000Z
+SUMMARY:Φυσική για Μηχανικούς (Εξάμ. 1)
+UID:ad24b836-589c-4427-b552-f21416a3d8f5@ad24.org
+END:VEVENT
+END:VCALENDAR
