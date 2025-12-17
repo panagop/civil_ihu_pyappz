@@ -4,6 +4,10 @@ from datetime import datetime, timedelta
 import streamlit as st
 from streamlit_calendar import calendar
 
+st.set_page_config(
+    layout="wide",
+)
+
 # ------------ ΡΥΘΜΙΣΕΙΣ ΧΡΗΣΤΗ ------------
 # INPUT_EXCEL = "lessons-calendars.xlsm"   # το αρχείο όπου έχεις το sheet Data
 INPUT_SHEET = "ExamsJan26"
@@ -101,58 +105,58 @@ with tab_semester_filter:
     st.dataframe(df_sem)    
 
 
-# with tab_calendar:
-st.subheader("Ημερολόγιο Εξετάσεων")
-calendar_options = {
-    "initialView": "dayGridMonth",
-    "selectable": True,
-    "weekends": False,
-    "headerToolbar": {
-        "left": "today prev,next",
-        "center": "title",
-        "right": "dayGridMonth,timeGridWeek,timeGridDay"
-    }
-}
-
-# Convert exam data to calendar events
-calendar_events = []
-for _, row in df.iterrows():
-    if pd.notna(row["start_dt"]):
-        # Format as string YYYY-MM-DDTHH:MM:SS
-        start_str = row["start_dt"].strftime("%Y-%m-%dT%H:%M:%S")
-        
-        # Calculate end time (2 hours after start)
-        end_dt = row["start_dt"] + timedelta(hours=2)
-        end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
-        
-        # Safely handle potential None values, convert to string, and remove problematic characters
-        def clean_text(value):
-            if pd.notna(value):
-                # Convert to string and remove newlines, quotes, backslashes
-                text = str(value).replace('\n', ' ').replace('\r', ' ')
-                text = text.replace('"', '').replace("'", '').replace('\\', '')
-                return text.strip()
-            return ""
-        
-        course_name = clean_text(row['course_name'])
-        instructor = clean_text(row['instructor'])
-        room = clean_text(row['room'])
-        semester = str(int(row['semester'])) if pd.notna(row['semester']) else ""
-        
-        event = {
-            "title": f'Εξ.{semester} - {course_name}',
-            "start": start_str,
-            "end": end_str
+with tab_calendar:
+    st.subheader("Ημερολόγιο Εξετάσεων")
+    calendar_options = {
+        "initialView": "dayGridMonth",
+        "selectable": True,
+        "weekends": False,
+        "headerToolbar": {
+            "left": "today prev,next",
+            "center": "title",
+            "right": "dayGridMonth,timeGridWeek,timeGridDay"
         }
-        calendar_events.append(event)
+    }
 
-# Debug: show number of events
-st.write(f"📅 Total events: {len(calendar_events)}")
+    # Convert exam data to calendar events
+    calendar_events = []
+    for _, row in df.iterrows():
+        if pd.notna(row["start_dt"]):
+            # Format as string YYYY-MM-DDTHH:MM:SS
+            start_str = row["start_dt"].strftime("%Y-%m-%dT%H:%M:%S")
+            
+            # Calculate end time (2 hours after start)
+            end_dt = row["start_dt"] + timedelta(hours=2)
+            end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            
+            # Safely handle potential None values, convert to string, and remove problematic characters
+            def clean_text(value):
+                if pd.notna(value):
+                    # Convert to string and remove newlines, quotes, backslashes
+                    text = str(value).replace('\n', ' ').replace('\r', ' ')
+                    text = text.replace('"', '').replace("'", '').replace('\\', '')
+                    return text.strip()
+                return ""
+            
+            course_name = clean_text(row['course_name'])
+            instructor = clean_text(row['instructor'])
+            room = clean_text(row['room'])
+            semester = str(int(row['semester'])) if pd.notna(row['semester']) else ""
+            
+            event = {
+                "title": f'Εξ.{semester} - {course_name}',
+                "start": start_str,
+                "end": end_str
+            }
+            calendar_events.append(event)
 
-calendar_data = calendar(
-    events=calendar_events,
-    options=calendar_options,
-    key="my_calender"
-)
+    # Debug: show number of events
+    st.write(f"📅 Total events: {len(calendar_events)}")
+
+    calendar_data = calendar(
+        events=calendar_events,
+        options=calendar_options,
+        key="my_calender"
+    )
 
 # st.write("Calendar interaction information:", calendar_data)
