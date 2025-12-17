@@ -40,6 +40,18 @@ def load_data() -> pd.DataFrame:
     # Drop rows where exam_date is missing
     df = df.dropna(subset=["exam_date"])
 
+    # Add day of week column (in Greek)
+    day_names_greek = {
+        0: 'Δευτέρα',
+        1: 'Τρίτη', 
+        2: 'Τετάρτη',
+        3: 'Πέμπτη',
+        4: 'Παρασκευή',
+        5: 'Σάββατο',
+        6: 'Κυριακή'
+    }
+    df["day_of_week"] = pd.to_datetime(df["exam_date"]).dt.dayofweek.map(day_names_greek)
+
     # Αν start_time είναι string τύπου "09:00"
     df["start_time"] = df["start_time"].astype(str)
 
