@@ -139,8 +139,7 @@ with tab_calendar:
             "left": "today prev,next",
             "center": "title",
             "right": "dayGridMonth,timeGridWeek,timeGridDay"
-        },
-        "height": "700px"
+        }
     }
 
     # Convert exam data to calendar events
