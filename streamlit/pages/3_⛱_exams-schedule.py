@@ -135,6 +135,8 @@ with tab_calendar:
         "initialDate": initial_date.strftime("%Y-%m-%d"),
         "selectable": True,
         "weekends": False,
+        "slotMinTime": "08:00:00",
+        "slotMaxTime": "22:00:00",
         "headerToolbar": {
             "left": "today prev,next",
             "center": "title",
