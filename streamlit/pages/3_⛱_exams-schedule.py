@@ -182,7 +182,7 @@ with tab_calendar:
             semester = str(int(row['semester'])) if pd.notna(row['semester']) else ""
             
             event = {
-                "title": f'Εξ.{semester} - {course_name}',
+                "title": f'Εξ.{semester} - {course_name} - {instructor}',
                 "start": start_str,
                 "end": end_str
             }
