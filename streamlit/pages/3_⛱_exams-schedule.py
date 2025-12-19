@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta
 import streamlit as st
@@ -114,7 +114,7 @@ with tab_semester_filter:
     )  
 
     st.subheader(f"Πρόγραμμα Εξετάσεων Εξαμήνου - {selected_semester}")
-    st.dataframe(df_sem)    
+    st.dataframe(df_sem, height=600)    
 
 
 with tab_calendar:
