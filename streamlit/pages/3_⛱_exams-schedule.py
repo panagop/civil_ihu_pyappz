@@ -237,7 +237,7 @@ def create_weekly_calendar_document(df: pd.DataFrame) -> bytes:
                 cell_content.append(exam_text)
             
             # Ενωση με διαχωριστικό γραμμή
-            cell.text = '\n---\n'.join(cell_content)
+            cell.text = '\n--------------------------------\n'.join(cell_content)
             
             # Στυλ κελιού
             for paragraph in cell.paragraphs:
