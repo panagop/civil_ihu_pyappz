@@ -419,9 +419,10 @@ with tab_export_weekly:
         )
     
     with col2:
-        # Φίλτρο εβδομάδων
+        # Φίλτρο εβδομάδων - δημιουργία αντιστοίχησης
         weeks_available = sorted(df['week_number'].unique().tolist())
-        week_options = [f"Εβδομάδα {int(w)}" for w in weeks_available]
+        # Δημιουργία λίστας με ανανεωμένους αριθμούς εβδομάδων (1, 2, 3, ...)
+        week_options = [f"Εβδομάδα {idx + 1}" for idx, _ in enumerate(weeks_available)]
         
         selected_export_weeks = st.multiselect(
             "Επιλέξτε εβδομάδες:",
@@ -438,8 +439,10 @@ with tab_export_weekly:
         df_export = df_export[df_export["semester"].isin(semester_nums)]
     
     if selected_export_weeks and len(selected_export_weeks) < len(week_options):
-        week_nums = [int(w.split()[-1]) for w in selected_export_weeks]
-        df_export = df_export[df_export["week_number"].isin(week_nums)]
+        # Μετατροπή επιλεγμένων εβδομάδων σε αντίστοιχους πραγματικούς αριθμούς εβδομάδων
+        selected_indices = [int(w.split()[-1]) - 1 for w in selected_export_weeks]
+        actual_week_nums = [weeks_available[idx] for idx in selected_indices]
+        df_export = df_export[df_export["week_number"].isin(actual_week_nums)]
     
     # Προεπισκόπηση
     st.markdown("### Προεπισκόπηση Δεδομένων")
