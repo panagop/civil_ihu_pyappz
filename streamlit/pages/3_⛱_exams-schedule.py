@@ -8,13 +8,29 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 
+exam_period = "Χειμερινό Εξάμηνο 2025-2026"
+
 st.set_page_config(
     layout="wide",
+    page_title=f"Πρόγραμμα Εξετάσεων - {exam_period}",
+    page_icon="🗓️",
+
 )
+
+st.title(f"🗓️ Πρόγραμμα Εξετάσεων - {exam_period}")
+
+program_selection: str = st.radio(
+    "Επιλογή προγράμματος σπουδών:",
+    options=["ΔΙΠΑΕ", "ΤΕΙ"],
+    index=0,
+    key="program_selection"
+)
+
+st.markdown(f"Έχετε επιλέξει το πρόγραμμα σπουδών: **{program_selection}**")
 
 # ------------ ΡΥΘΜΙΣΕΙΣ ΧΡΗΣΤΗ ------------
 # INPUT_EXCEL = "lessons-calendars.xlsm"   # το αρχείο όπου έχεις το sheet Data
-INPUT_SHEET = "2026-01"
+INPUT_SHEET = program_selection
 INPUT_EXCEL = Path(__file__).parent.parent.parent / "files" / "exams" / "exams-2026-01.xlsm"
 
 
@@ -481,7 +497,7 @@ with tab_export_weekly:
             word_file = create_weekly_calendar_document(df_export)
             
             # Όνομα αρχείου με ημερομηνία
-            filename = f"Προγραμμα_Εξετασεων_Εβδομαδιαιο_{datetime.now().strftime('%Y%m%d')}.docx"
+            filename = f"Πρόγραμμα_Εξετάσεων_{program_selection}_{exam_period}.docx"
             
             st.download_button(
                 label="📥 Λήψη Word Αρχείου",
