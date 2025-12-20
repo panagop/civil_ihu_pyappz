@@ -317,7 +317,9 @@ df = load_data()
 
 with tab_full_table:
     st.subheader("Πλήρης Πίνακας Εξετάσεων")
-    st.dataframe(df)
+    # Απόκρυψη βοηθητικών στηλών
+    display_cols = [col for col in df.columns if col not in ['start_dt', 'iso_week_number']]
+    st.dataframe(df[display_cols])
 
 instructors = sorted(df["instructor"].unique().tolist())
 
@@ -332,7 +334,9 @@ with tab_instructor_filter:
     )  
 
     st.subheader(f"Πρόγραμμα Εξετάσεων Διδάσκοντα - {selected_instructor}")
-    st.dataframe(df_instr)
+    # Απόκρυψη βοηθητικών στηλών
+    display_cols = [col for col in df_instr.columns if col not in ['start_dt', 'iso_week_number']]
+    st.dataframe(df_instr[display_cols])
 
 with tab_semester_filter:
     semesters = sorted(df["semester"].unique().tolist())
@@ -346,7 +350,9 @@ with tab_semester_filter:
     )  
 
     st.subheader(f"Πρόγραμμα Εξετάσεων Εξαμήνου - {selected_semester}")
-    st.dataframe(df_sem, height=600)    
+    # Απόκρυψη βοηθητικών στηλών
+    display_cols = [col for col in df_sem.columns if col not in ['start_dt', 'iso_week_number']]
+    st.dataframe(df_sem[display_cols], height=600)    
 
 
 with tab_calendar:
