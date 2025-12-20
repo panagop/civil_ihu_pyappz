@@ -103,7 +103,12 @@ def load_data() -> pd.DataFrame:
 
     # Υπολογισμός end_dt με default διάρκεια
     # Στήλη εβδομάδας (για weekly views)
-    df["week_number"] = df["start_dt"].dt.isocalendar().week
+    df["iso_week_number"] = df["start_dt"].dt.isocalendar().week
+    
+    # Δημιουργία αντιστοίχησης για εβδομάδες (1, 2, 3, ... αντί για ISO week numbers)
+    unique_weeks = sorted(df["iso_week_number"].unique())
+    week_mapping = {iso_week: idx + 1 for idx, iso_week in enumerate(unique_weeks)}
+    df["week_number"] = df["iso_week_number"].map(week_mapping)
 
     return df
 
@@ -474,10 +479,9 @@ with tab_export_weekly:
         )
     
     with col2:
-        # Φίλτρο εβδομάδων - δημιουργία αντιστοίχησης
+        # Φίλτρο εβδομάδων
         weeks_available = sorted(df['week_number'].unique().tolist())
-        # Δημιουργία λίστας με ανανεωμένους αριθμούς εβδομάδων (1, 2, 3, ...)
-        week_options = [f"Εβδομάδα {idx + 1}" for idx, _ in enumerate(weeks_available)]
+        week_options = [f"Εβδομάδα {int(w)}" for w in weeks_available]
         
         selected_export_weeks = st.multiselect(
             "Επιλέξτε εβδομάδες:",
@@ -494,10 +498,8 @@ with tab_export_weekly:
         df_export = df_export[df_export["semester"].isin(semester_nums)]
     
     if selected_export_weeks and len(selected_export_weeks) < len(week_options):
-        # Μετατροπή επιλεγμένων εβδομάδων σε αντίστοιχους πραγματικούς αριθμούς εβδομάδων
-        selected_indices = [int(w.split()[-1]) - 1 for w in selected_export_weeks]
-        actual_week_nums = [weeks_available[idx] for idx in selected_indices]
-        df_export = df_export[df_export["week_number"].isin(actual_week_nums)]
+        week_nums = [int(w.split()[-1]) for w in selected_export_weeks]
+        df_export = df_export[df_export["week_number"].isin(week_nums)]
     
     # Προεπισκόπηση
     st.markdown("### Προεπισκόπηση Δεδομένων")
