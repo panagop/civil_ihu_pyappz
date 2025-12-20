@@ -37,7 +37,27 @@ INPUT_EXCEL = Path(__file__).parent.parent.parent / "files" / "exams" / "exams-2
 # @st.cache_data
 def load_data() -> pd.DataFrame:
     """Διαβάζει τα δεδομένα από το Excel (sheet Data)."""
-    df = pd.read_excel(INPUT_EXCEL, sheet_name=INPUT_SHEET)
+    
+    # Έλεγχος ύπαρξης αρχείου
+    if not INPUT_EXCEL.exists():
+        st.error(f"❌ Το αρχείο {INPUT_EXCEL} δεν βρέθηκε!")
+        st.info(f"Αναζητούμενη διαδρομή: {INPUT_EXCEL.absolute()}")
+        st.stop()
+    
+    try:
+        # Έλεγχος διαθέσιμων sheets
+        excel_file = pd.ExcelFile(INPUT_EXCEL)
+        available_sheets = excel_file.sheet_names
+        
+        if INPUT_SHEET not in available_sheets:
+            st.error(f"❌ Το sheet '{INPUT_SHEET}' δεν βρέθηκε στο αρχείο!")
+            st.info(f"Διαθέσιμα sheets: {', '.join(available_sheets)}")
+            st.stop()
+        
+        df = pd.read_excel(INPUT_EXCEL, sheet_name=INPUT_SHEET)
+    except Exception as e:
+        st.error(f"❌ Σφάλμα κατά το άνοιγμα του αρχείου: {e}")
+        st.stop()
 
     # Βεβαιώσου ότι τα ονόματα στηλών ταιριάζουν με αυτά
     required_cols = [
