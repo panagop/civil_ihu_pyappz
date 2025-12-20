@@ -347,6 +347,20 @@ with tab_calendar:
         }
     }
 
+    # Χρώματα ανά εξάμηνο
+    semester_colors = {
+        1: '#E74C3C',  # Κόκκινο
+        2: '#3498DB',  # Μπλε
+        3: '#2ECC71',  # Πράσινο
+        4: '#F39C12',  # Πορτοκαλί
+        5: '#9B59B6',  # Μωβ
+        6: '#1ABC9C',  # Τιρκουάζ
+        7: '#E67E22',  # Πορτοκαλί σκούρο
+        8: '#34495E',  # Γκρι-μπλε
+        9: '#16A085',  # Πράσινο-μπλε
+        10: '#D35400', # Καφέ-πορτοκαλί
+    }
+    
     # Convert exam data to calendar events
     calendar_events = []
     for _, row in df_calendar.iterrows():
@@ -370,12 +384,17 @@ with tab_calendar:
             course_name = clean_text(row['course_name'])
             instructor = clean_text(row['instructor'])
             room = clean_text(row['room'])
-            semester = str(int(row['semester'])) if pd.notna(row['semester']) else ""
+            semester = int(row['semester']) if pd.notna(row['semester']) else 1
+            semester_str = str(semester)
+            
+            # Επιλογή χρώματος βάσει εξαμήνου
+            color = semester_colors.get(semester, '#95A5A6')  # Default γκρι αν δεν βρεθεί
             
             event = {
-                "title": f'Εξ.{semester} - {course_name} - {instructor}',
+                "title": f'Εξ.{semester_str} - {course_name} - {instructor}',
                 "start": start_str,
-                "end": end_str
+                "end": end_str,
+                "color": color
             }
             calendar_events.append(event)
 
