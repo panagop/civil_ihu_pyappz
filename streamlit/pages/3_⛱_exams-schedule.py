@@ -381,7 +381,7 @@ with tab_calendar:
     initial_date = df_calendar["exam_date"].min() if not df_calendar.empty else datetime.now().date()
 
     calendar_options = {
-        "initialView": "dayGridMonth",
+        "initialView": "timeGridWeek",
         "initialDate": initial_date.strftime("%Y-%m-%d"),
         "selectable": True,
         "weekends": False,
@@ -452,14 +452,25 @@ with tab_calendar:
         semesters_text = ", ".join(selected_calendar_semesters)
         st.write(f"📅 Σύνολο εξετάσεων: {len(calendar_events)} ({semesters_text})")
 
-    # Create a unique key based on selected semesters to force calendar re-render
-    calendar_key = f"calendar_{'_'.join(sorted(selected_calendar_semesters)) if selected_calendar_semesters else 'all'}"
+    # Initialize session state for calendar display
+    if 'show_exam_calendar' not in st.session_state:
+        st.session_state.show_exam_calendar = False
 
-    calendar_data = calendar(
-        events=calendar_events,
-        options=calendar_options,
-        key=calendar_key
-    )
+    # Button to show calendar
+    if not st.session_state.show_exam_calendar:
+        if st.button("📅 Εμφάνιση Ημερολογίου", key="show_exam_cal_btn"):
+            st.session_state.show_exam_calendar = True
+            st.rerun()
+    
+    # Render calendar if button was clicked
+    if st.session_state.show_exam_calendar:
+        if calendar_events:
+            calendar_data = calendar(
+                events=calendar_events,
+                options=calendar_options
+            )
+        else:
+            st.info("Δεν υπάρχουν εξετάσεις για εμφάνιση με τα επιλεγμένα φίλτρα.")
 
 # st.write("Calendar interaction information:", calendar_data)
 
