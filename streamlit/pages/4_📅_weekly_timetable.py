@@ -15,6 +15,12 @@ st.set_page_config(
     page_icon="📅",
 )
 
+# Χρώματα ανά εξάμηνο σπουδών
+SEMESTER_COLORS = {
+    1: '#E74C3C',  2: '#3498DB',  3: '#2ECC71',  4: '#F39C12',  5: '#9B59B6',
+    6: '#1ABC9C',  7: '#E67E22',  8: '#34495E',  9: '#16A085',  10: '#D35400',
+}
+
 st.title("📅 Εβδομαδιαίο Πρόγραμμα Μαθημάτων")
 
 # Επιλογή εξαμήνου
@@ -400,16 +406,6 @@ try:
         semester_num = int(selected_semester.split()[-1])
         df_filtered = df[df["semester"] == semester_num]
         
-        # Χρώματα ανά εξάμηνο
-        semester_colors = {
-            1: '#E74C3C',  2: '#E74C3C',  3: '#E74C3C',  4: '#E74C3C',  5: '#E74C3C',
-            6: '#E74C3C',  7: '#E74C3C',  8: '#E74C3C',  9: '#E74C3C',  10: '#E74C3C',
-        }
-        # semester_colors = {
-        #     1: '#E74C3C',  2: '#3498DB',  3: '#2ECC71',  4: '#F39C12',  5: '#9B59B6',
-        #     6: '#1ABC9C',  7: '#E67E22',  8: '#34495E',  9: '#16A085',  10: '#D35400',
-        # }
-        
         # Safely handle potential None values, convert to string, and remove problematic characters
         def clean_text(value):
             if pd.notna(value):
@@ -464,7 +460,7 @@ try:
                     semester = int(row['semester']) if pd.notna(row['semester']) else 1
                     
                     # Get color
-                    color = semester_colors.get(semester, '#95A5A6')
+                    color = SEMESTER_COLORS.get(semester, '#95A5A6')
                     
                     # Create concise title
                     title_parts = [full_class_name]
@@ -582,12 +578,6 @@ try:
             # Φιλτράρισμα δεδομένων ανά αίθουσα (convert to string for comparison)
             df_filtered_room = df[df["room"].astype(str) == selected_room]
             
-            # Χρώματα ανά εξάμηνο για οπτική διάκριση
-            room_semester_colors = {
-                1: '#E74C3C',  2: '#3498DB',  3: '#2ECC71',  4: '#F39C12',  5: '#9B59B6',
-                6: '#1ABC9C',  7: '#E67E22',  8: '#34495E',  9: '#16A085',  10: '#D35400',
-            }
-            
             # Safely handle potential None values, convert to string, and remove problematic characters
             def clean_text_room(value):
                 if pd.notna(value):
@@ -641,7 +631,7 @@ try:
                         semester = int(row['semester']) if pd.notna(row['semester']) else 1
                         
                         # Get color based on semester
-                        color = room_semester_colors.get(semester, '#95A5A6')
+                        color = SEMESTER_COLORS.get(semester, '#95A5A6')
                         
                         # Create concise title (include semester info)
                         title_parts = [full_class_name]
