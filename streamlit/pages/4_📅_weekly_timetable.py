@@ -3,6 +3,11 @@ from pathlib import Path
 import streamlit as st
 from datetime import datetime, timedelta
 from streamlit_calendar import calendar
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+import io
+from collections import defaultdict
 
 st.set_page_config(
     layout="wide",
@@ -97,6 +102,269 @@ def load_data() -> pd.DataFrame:
     return df
 
 
+def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
+    """Δημιουργεί Word έγγραφο με εβδομαδιαίο πρόγραμμα μαθημάτων"""
+    doc = Document()
+    
+    # Ρυθμίσεις σελίδας - landscape
+    section = doc.sections[0]
+    section.orientation = 1  # Landscape
+    section.page_width = Inches(11)
+    section.page_height = Inches(8.5)
+    
+    # Τίτλος
+    title = doc.add_heading(f'Εβδομαδιαίο Πρόγραμμα Μαθημάτων - {period} Εξάμηνο 2025-2026', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Ομαδοποίηση ανά εξάμηνο σπουδών
+    semesters = sorted(df['semester'].unique())
+    
+    for sem_idx, semester in enumerate(semesters):
+        df_sem = df[df['semester'] == semester]
+        
+        if df_sem.empty:
+            continue
+        
+        # Επικεφαλίδα εξαμήνου
+        sem_heading = doc.add_heading(f'Εξάμηνο {int(semester)}', level=1)
+        
+        # Όλες οι ώρες από 9:00 έως 21:00
+        time_slots = list(range(9, 22))  # 9, 10, 11, ..., 21
+        time_slots_str = [f"{h}:00" for h in time_slots]
+        
+        # Ημέρες της εβδομάδας
+        day_names = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή']
+        
+        # Δημιουργία dictionary για συγκέντρωση μαθημάτων ανά κελί
+        cell_classes = defaultdict(list)
+        
+        for day_idx, day_name in enumerate(day_names):
+            df_day = df_sem[df_sem['day'] == day_name]
+            
+            for _, class_row in df_day.iterrows():
+                start_time_str = str(class_row['start_time'])
+                if ':' in start_time_str:
+                    class_hour = int(start_time_str.split(':')[0])
+                else:
+                    try:
+                        class_hour = int(float(start_time_str))
+                    except:
+                        continue
+                
+                # Βρες το σωστό time slot index
+                try:
+                    time_idx = time_slots.index(class_hour)
+                except ValueError:
+                    continue
+                
+                # Προσθήκη μαθήματος στο dictionary με key (time_idx, day_idx)
+                cell_key = (time_idx, day_idx)
+                cell_classes[cell_key].append({
+                    'course': str(class_row['full_class_name']) if pd.notna(class_row['full_class_name']) else '',
+                    'instructor': str(class_row['instructors']) if pd.notna(class_row['instructors']) else '',
+                    'room': str(class_row['room']) if pd.notna(class_row['room']) else '',
+                    'duration': int(class_row['duration']) if pd.notna(class_row['duration']) else 1
+                })
+        
+        # Υπολογισμός μέγιστου αριθμού ταυτόχρονων μαθημάτων
+        max_simultaneous = 1
+        for classes in cell_classes.values():
+            max_simultaneous = max(max_simultaneous, len(classes))
+        
+        # Δημιουργία πίνακα με επιπλέον στήλες για ταυτόχρονα μαθήματα
+        total_cols = 1 + (len(day_names) * max_simultaneous)
+        table = doc.add_table(rows=len(time_slots) + 1, cols=total_cols)
+        table.style = 'Light Grid Accent 1'
+        
+        # Επικεφαλίδα - στήλη ώρας
+        table.rows[0].cells[0].text = 'Ώρα'
+        
+        # Επικεφαλίδες ημερών - merge cells για κάθε ημέρα
+        for day_idx, day_name in enumerate(day_names):
+            start_col = 1 + (day_idx * max_simultaneous)
+            cell = table.rows[0].cells[start_col]
+            
+            # Merge across all sub-columns for this day
+            if max_simultaneous > 1:
+                for sub_col in range(1, max_simultaneous):
+                    cell.merge(table.rows[0].cells[start_col + sub_col])
+            
+            cell.text = day_name
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in paragraph.runs:
+                    run.font.name = 'Calibri'
+                    run.font.bold = True
+                    run.font.size = Pt(10)
+                    run.font.color.rgb = RGBColor(255, 255, 255)
+        
+        # Συμπλήρωση σειρών ωρών και μαθημάτων
+        processed_cells = {}  # Track which (time_idx, day_idx, cls_idx) have been processed
+        
+        for time_idx, time_slot in enumerate(time_slots_str):
+            row_idx = time_idx + 1
+            
+            # Στήλη ώρας
+            cell = table.rows[row_idx].cells[0]
+            cell.text = time_slot
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in paragraph.runs:
+                    run.font.name = 'Calibri'
+                    run.font.bold = True
+                    run.font.size = Pt(9)
+                    run.font.color.rgb = RGBColor(255, 255, 255)
+            
+            # Κελιά μαθημάτων για κάθε ημέρα
+            for day_idx in range(len(day_names)):
+                cell_key = (time_idx, day_idx)
+                classes = cell_classes.get(cell_key, [])
+                
+                start_col = 1 + (day_idx * max_simultaneous)
+                
+                if len(classes) <= 1:
+                    # Check if already processed as part of a duration span
+                    if (time_idx, day_idx, 0) in processed_cells:
+                        continue
+                    
+                    # 0 ή 1 μάθημα
+                    if len(classes) == 1:
+                        cls = classes[0]
+                        duration = cls['duration']
+                        
+                        # Mark this cell and future rows as processed
+                        for dur in range(duration):
+                            processed_cells[(time_idx + dur, day_idx, 0)] = True
+                        
+                        # Get the starting cell
+                        cell = table.rows[row_idx].cells[start_col]
+                        
+                        # First merge horizontally across sub-columns for this row
+                        if max_simultaneous > 1:
+                            for sub_col in range(1, max_simultaneous):
+                                cell.merge(table.rows[row_idx].cells[start_col + sub_col])
+                        
+                        # Then merge vertically for duration
+                        if duration > 1:
+                            for dur_offset in range(1, duration):
+                                if time_idx + dur_offset < len(time_slots):
+                                    next_row = row_idx + dur_offset
+                                    next_cell = table.rows[next_row].cells[start_col]
+                                    
+                                    # Merge horizontal sub-columns first for the next row
+                                    if max_simultaneous > 1:
+                                        for sub_col in range(1, max_simultaneous):
+                                            next_cell.merge(table.rows[next_row].cells[start_col + sub_col])
+                                    
+                                    # Now merge vertically
+                                    cell.merge(next_cell)
+                        
+                        class_text = f"{cls['course']}\n{cls['instructor']}"
+                        if cls['room']:
+                            class_text += f"\n{cls['room']}"
+                        cell.text = class_text
+                        
+                        for paragraph in cell.paragraphs:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            for run in paragraph.runs:
+                                run.font.name = 'Calibri'
+                                run.font.size = Pt(8)
+                    else:
+                        # Κενό κελί - merge όλες τις υπο-στήλες
+                        cell = table.rows[row_idx].cells[start_col]
+                        if max_simultaneous > 1:
+                            for sub_col in range(1, max_simultaneous):
+                                cell.merge(table.rows[row_idx].cells[start_col + sub_col])
+                else:
+                    # Πολλαπλά μαθήματα - ξεχωριστό κελί για καθένα
+                    for cls_idx, cls in enumerate(classes[:max_simultaneous]):
+                        # Check if already processed
+                        if (time_idx, day_idx, cls_idx) in processed_cells:
+                            continue
+                        
+                        col = start_col + cls_idx
+                        duration = cls['duration']
+                        
+                        # Mark as processed
+                        for dur in range(duration):
+                            processed_cells[(time_idx + dur, day_idx, cls_idx)] = True
+                        
+                        cell = table.rows[row_idx].cells[col]
+                        
+                        # Merge vertically for duration
+                        if duration > 1:
+                            for dur_offset in range(1, duration):
+                                if time_idx + dur_offset < len(time_slots):
+                                    cell.merge(table.rows[row_idx + dur_offset].cells[col])
+                        
+                        class_text = f"{cls['course']}\n{cls['instructor']}"
+                        if cls['room']:
+                            class_text += f"\n{cls['room']}"
+                        cell.text = class_text
+                        
+                        for paragraph in cell.paragraphs:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            for run in paragraph.runs:
+                                run.font.name = 'Calibri'
+                                run.font.size = Pt(8)
+                    
+                    # Merge empty sub-columns if any
+                    if len(classes) < max_simultaneous and (time_idx, day_idx, len(classes)) not in processed_cells:
+                        remaining_start = start_col + len(classes)
+                        remaining_cell = table.rows[row_idx].cells[remaining_start]
+                        for sub_col in range(len(classes) + 1, max_simultaneous):
+                            remaining_cell.merge(table.rows[row_idx].cells[start_col + sub_col])
+        
+        # Εφαρμογή χρωμάτων
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        # Χρώμα επικεφαλίδας
+        for col_idx in range(0, total_cols):
+            cell = table.rows[0].cells[col_idx]
+            shading_elm = OxmlElement('w:shd')
+            shading_elm.set(qn('w:fill'), '4472C4')
+            cell._element.get_or_add_tcPr().append(shading_elm)
+        
+        # Χρώματα κελιών - λευκό για κενά, E7EFF7 για μαθήματα
+        for row_idx in range(1, len(time_slots) + 1):
+            for col_idx in range(0, total_cols):
+                cell = table.rows[row_idx].cells[col_idx]
+                shading_elm = OxmlElement('w:shd')
+                
+                if col_idx == 0:
+                    # Στήλη ωρών - σκούρο μπλε
+                    shading_elm.set(qn('w:fill'), '4472C4')
+                else:
+                    # Έλεγχος αν το κελί έχει περιεχόμενο (μάθημα)
+                    cell_text = cell.text.strip()
+                    if cell_text:
+                        # Κελί με μάθημα - ανοιχτό μπλε
+                        shading_elm.set(qn('w:fill'), 'E7EFF7')
+                    else:
+                        # Κενό κελί - λευκό
+                        shading_elm.set(qn('w:fill'), 'FFFFFF')
+                
+                cell._element.get_or_add_tcPr().append(shading_elm)
+        
+        # Προσαρμογή πλάτους στηλών και ύψους σειρών
+        for row in table.rows:
+            row.height = Inches(0.4)  # Fixed height for all rows
+            row.cells[0].width = Inches(0.7)
+            for i in range(1, len(day_names) * max_simultaneous + 1):
+                row.cells[i].width = Inches(1.5)
+        
+        # Page break μεταξύ εξαμήνων (εκτός από το τελευταίο)
+        if sem_idx < len(semesters) - 1:
+            doc.add_page_break()
+    
+    # Αποθήκευση σε buffer
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # Φόρτωση δεδομένων
 try:
     df = load_data()
@@ -104,7 +372,7 @@ try:
     # st.subheader(f"Πρόγραμμα {semester_selection} Εξαμήνου 2025-2026")
     
     # Tabs
-    tab_table, tab_calendar = st.tabs(["Πίνακας", "Εβδομαδιαία Προβολή"])
+    tab_table, tab_calendar, tab_export = st.tabs(["Πίνακας", "Εβδομαδιαία Προβολή", "Εξαγωγή Word"])
     
     with tab_table:
         # Εμφάνιση δεδομένων (με end_time)
@@ -294,6 +562,68 @@ try:
                 )
             else:
                 st.info("Δεν υπάρχουν μαθήματα για εμφάνιση με τα επιλεγμένα φίλτρα.")
+    
+    with tab_export:
+        st.subheader("Εξαγωγή Εβδομαδιαίου Προγράμματος")
+        st.markdown("Δημιουργήστε αρχείο Word με το εβδομαδιαίο πρόγραμμα μαθημάτων για όλα τα εξάμηνα.")
+        
+        # Φίλτρα για εξαγωγή
+        st.markdown("### Επιλογές Φιλτραρίσματος")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            semesters_export = sorted(df["semester"].unique().tolist())
+            semester_options_export = [f"Εξάμηνο {int(s)}" for s in semesters_export]
+            
+            selected_export_semesters = st.multiselect(
+                "Επιλέξτε εξάμηνα:",
+                options=semester_options_export,
+                default=semester_options_export,
+                key="export_semester_filter"
+            )
+        
+        # Φιλτράρισμα δεδομένων
+        df_export = df.copy()
+        
+        if selected_export_semesters and len(selected_export_semesters) < len(semester_options_export):
+            semester_nums = [int(s.split()[-1]) for s in selected_export_semesters]
+            df_export = df_export[df_export["semester"].isin(semester_nums)]
+        
+        # Προεπισκόπηση
+        st.markdown("### Προεπισκόπηση Δεδομένων")
+        st.write(f"Σύνολο μαθημάτων προς εξαγωγή: {len(df_export)}")
+        
+        if not df_export.empty:
+            st.dataframe(
+                df_export[['day', 'start_time', 'semester', 'full_class_name', 
+                          'instructors', 'room', 'duration']].sort_values(by=['semester', 'day', 'start_time']),
+                height=400
+            )
+            
+            # Κουμπί λήψης
+            st.markdown("### Λήψη Αρχείου")
+            
+            try:
+                word_file = create_weekly_timetable_document(df_export, period_selection)
+                
+                # Όνομα αρχείου
+                filename = f"Προγραμμα_Μαθηματων_{period_selection}_2025-2026.docx"
+                
+                st.download_button(
+                    label="📥 Λήψη Word Αρχείου",
+                    data=word_file,
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    help="Κατεβάστε το εβδομαδιαίο πρόγραμμα μαθημάτων σε μορφή Word"
+                )
+                
+                st.success("✅ Το αρχείο είναι έτοιμο για λήψη!")
+                
+            except Exception as e:
+                st.error(f"Σφάλμα κατά τη δημιουργία του αρχείου: {e}")
+        else:
+            st.warning("⚠️ Δεν υπάρχουν δεδομένα με τα επιλεγμένα φίλτρα.")
         
 except Exception as e:
     st.error(f"Σφάλμα: {e}")
