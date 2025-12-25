@@ -372,7 +372,7 @@ try:
     # st.subheader(f"Πρόγραμμα {semester_selection} Εξαμήνου 2025-2026")
     
     # Tabs
-    tab_table, tab_calendar, tab_export = st.tabs(["Πίνακας", "Εβδομαδιαία Προβολή", "Εξαγωγή Word"])
+    tab_table, tab_calendar, tab_rooms, tab_export = st.tabs(["Πίνακας", "Εβδομαδιαία Προβολή", "Αιθουσιολόγιο", "Εξαγωγή Word"])
     
     with tab_table:
         # Εμφάνιση δεδομένων (με end_time)
@@ -562,6 +562,180 @@ try:
                 )
             else:
                 st.info("Δεν υπάρχουν μαθήματα για εμφάνιση με τα επιλεγμένα φίλτρα.")
+    
+    with tab_rooms:
+        st.markdown("### Αιθουσιολόγιο - Πρόγραμμα Αιθουσών")
+        
+        # Φίλτρο αιθουσών
+        rooms_all = sorted([str(r) for r in df["room"].unique() if pd.notna(r) and str(r).strip()])
+        
+        if not rooms_all:
+            st.warning("⚠️ Δεν βρέθηκαν αίθουσες στα δεδομένα.")
+        else:
+            selected_room = st.selectbox(
+                "Επιλέξτε αίθουσα:",
+                options=rooms_all,
+                index=0,
+                key="room_filter"
+            )
+            
+            # Φιλτράρισμα δεδομένων ανά αίθουσα (convert to string for comparison)
+            df_filtered_room = df[df["room"].astype(str) == selected_room]
+            
+            # Χρώματα ανά εξάμηνο για οπτική διάκριση
+            room_semester_colors = {
+                1: '#E74C3C',  2: '#3498DB',  3: '#2ECC71',  4: '#F39C12',  5: '#9B59B6',
+                6: '#1ABC9C',  7: '#E67E22',  8: '#34495E',  9: '#16A085',  10: '#D35400',
+            }
+            
+            # Safely handle potential None values, convert to string, and remove problematic characters
+            def clean_text_room(value):
+                if pd.notna(value):
+                    # Convert to string and remove newlines, quotes, backslashes
+                    text = str(value).replace('\n', ' ').replace('\r', ' ')
+                    text = text.replace('"', '').replace("'", '').replace('\\', '')
+                    return text.strip()
+                return ""
+            
+            # Convert to calendar events
+            calendar_events_room = []
+            
+            # Map Greek days to weekday numbers (0=Monday)
+            day_map_room = {
+                'Δευτέρα': 0, 'Τρίτη': 1, 'Τετάρτη': 2, 'Πέμπτη': 3, 'Παρασκευή': 4,
+                'Σάββατο': 5, 'Κυριακή': 6
+            }
+            
+            # Use a reference week (e.g., a week in January 2025)
+            reference_date_room = datetime(2025, 1, 6)  # Monday, January 6, 2025
+            
+            for _, row in df_filtered_room.iterrows():
+                try:
+                    if pd.notna(row['day']) and pd.notna(row['start_time']):
+                        # Get the day of week
+                        day_name = str(row['day']).strip()
+                        weekday = day_map_room.get(day_name, 0)
+                        
+                        # Calculate the date for this event
+                        event_date = reference_date_room + timedelta(days=weekday)
+                        
+                        # Extract hour from start_time
+                        start_time_str = str(row['start_time'])
+                        if ':' in start_time_str:
+                            start_hour = int(start_time_str.split(':')[0])
+                        else:
+                            start_hour = int(float(start_time_str))
+                        
+                        # Create start datetime
+                        start_dt = event_date.replace(hour=start_hour, minute=0, second=0)
+                        start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                        
+                        # Calculate end time based on duration
+                        duration = int(row['duration']) if pd.notna(row['duration']) else 1
+                        end_dt = start_dt + timedelta(hours=duration)
+                        end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                        
+                        # Clean text
+                        full_class_name = clean_text_room(row['full_class_name'])
+                        instructors = clean_text_room(row['instructors'])
+                        semester = int(row['semester']) if pd.notna(row['semester']) else 1
+                        
+                        # Get color based on semester
+                        color = room_semester_colors.get(semester, '#95A5A6')
+                        
+                        # Create concise title (include semester info)
+                        title_parts = [full_class_name]
+                        if instructors:
+                            title_parts.append(instructors)
+                        title_parts.append(f'Εξ.{semester}')
+                        
+                        event = {
+                            "title": ' - '.join(title_parts),
+                            "start": start_str,
+                            "end": end_str,
+                            "color": color
+                        }
+                        calendar_events_room.append(event)
+                except Exception as e:
+                    # Skip rows with errors
+                    continue
+            
+            st.write(f"🏫 Σύνολο μαθημάτων στην αίθουσα {selected_room}: {len(calendar_events_room)}")
+            
+            # CSS to hide dates and make it look generic
+            st.markdown("""
+            <style>
+            /* Hide the date numbers in column headers */
+            .fc-col-header-cell-cushion {
+                font-size: 14px !important;
+            }
+            .fc-daygrid-day-number {
+                display: none !important;
+            }
+            /* Hide the full date range in title */
+            .fc-toolbar-title {
+                display: none !important;
+            }
+            /* Style for cleaner look */
+            .fc-toolbar-chunk:first-child {
+                display: none !important;
+            }
+            /* Preserve whitespace and line breaks in event titles */
+            .fc-event-title, .fc-event-title-container, .fc-timegrid-event-harness, .fc-event-main {
+                white-space: pre-line !important;
+            }
+            .fc-timegrid-event {
+                white-space: pre-line !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            # Calendar options
+            calendar_options_room = {
+                "initialView": "timeGridWeek",
+                "initialDate": "2025-01-06",  # Start on Monday
+                "headerToolbar": {
+                    "left": "",
+                    "center": "", 
+                    "right": ""
+                },
+                "slotMinTime": "08:00:00",
+                "slotMaxTime": "21:00:00",
+                "allDaySlot": False,
+                "height": 850,
+                "locale": "el",
+                "firstDay": 1,  # Monday
+                "weekends": False,  # Hide weekends
+                "navLinks": False,
+                "editable": False,
+                "selectable": False,
+                "dayHeaderFormat": {"weekday": "long"},  # Show only day names
+                "displayEventTime": False,  # Hide time in event boxes
+            }
+            
+            # Create a unique key based on selected room
+            calendar_key_room = f"room_timetable_{selected_room}"
+            
+            # Initialize session state for room calendar display
+            if 'show_room_calendar' not in st.session_state:
+                st.session_state.show_room_calendar = False
+
+            # Button to show calendar
+            if not st.session_state.show_room_calendar:
+                if st.button("🏫 Εμφάνιση Αιθουσιολογίου", key="show_room_cal_btn"):
+                    st.session_state.show_room_calendar = True
+                    st.rerun()
+            
+            # Render calendar if button was clicked
+            if st.session_state.show_room_calendar:
+                if calendar_events_room:
+                    calendar_data_room = calendar(
+                        events=calendar_events_room,
+                        options=calendar_options_room,
+                        key=calendar_key_room
+                    )
+                else:
+                    st.info("Δεν υπάρχουν μαθήματα στην επιλεγμένη αίθουσα.")
     
     with tab_export:
         st.subheader("Εξαγωγή Εβδομαδιαίου Προγράμματος")
