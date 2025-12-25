@@ -378,7 +378,7 @@ try:
     # st.subheader(f"Πρόγραμμα {semester_selection} Εξαμήνου 2025-2026")
     
     # Tabs
-    tab_table, tab_calendar, tab_rooms, tab_export = st.tabs(["Πίνακας", "Εβδομαδιαία Προβολή", "Αιθουσιολόγιο", "Εξαγωγή Word"])
+    tab_table, tab_calendar, tab_rooms, tab_instructors, tab_export = st.tabs(["Πίνακας", "Εβδομαδιαία Προβολή", "Αιθουσιολόγιο", "Ανά Καθηγητή", "Εξαγωγή Word"])
     
     with tab_table:
         # Εμφάνιση δεδομένων (με end_time)
@@ -726,6 +726,105 @@ try:
                     )
                 else:
                     st.info("Δεν υπάρχουν μαθήματα στην επιλεγμένη αίθουσα.")
+    
+    with tab_instructors:
+        st.markdown("### Μαθήματα Ανά Καθηγητή")
+        
+        # Δημιουργία λίστας με όλα τα μαθήματα ανά καθηγητή
+        # Χειρισμός πολλαπλών καθηγητών στο ίδιο μάθημα
+        instructor_classes = []
+        
+        for _, row in df.iterrows():
+            if pd.notna(row['instructors']) and str(row['instructors']).strip():
+                # Διαχωρισμός καθηγητών (με κόμμα, ερωτηματικό, ή άλλους διαχωριστές)
+                instructors_list = str(row['instructors']).replace(';', ',').split(',')
+                
+                for instructor in instructors_list:
+                    instructor = instructor.strip()
+                    if instructor:  # Αγνόηση κενών εγγραφών
+                        instructor_classes.append({
+                            'Καθηγητής': instructor,
+                            'Κωδικός': row['course_id'],
+                            'Μάθημα': row['course_name'],
+                            'Τμήμα': row['class_name'] if pd.notna(row['class_name']) else '',
+                            'Εξάμηνο': int(row['semester']) if pd.notna(row['semester']) else '',
+                            'Ημέρα': row['day'],
+                            'Ώρα': row['start_time'],
+                            'Διάρκεια': f"{int(row['duration'])}h" if pd.notna(row['duration']) else '',
+                            'Αίθουσα': row['room'] if pd.notna(row['room']) else '',
+                            'Παρατηρήσεις': row['notes'] if pd.notna(row['notes']) else ''
+                        })
+        
+        if not instructor_classes:
+            st.warning("⚠️ Δεν βρέθηκαν καθηγητές στα δεδομένα.")
+        else:
+            # Δημιουργία DataFrame
+            df_instructors = pd.DataFrame(instructor_classes)
+            
+            # Ταξινόμηση κατά καθηγητή, εξάμηνο, ημέρα
+            df_instructors = df_instructors.sort_values(by=['Καθηγητής', 'Εξάμηνο', 'Ημέρα', 'Ώρα'])
+            
+            # Φίλτρο καθηγητών
+            all_instructors = sorted(df_instructors['Καθηγητής'].unique().tolist())
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                selected_instructor = st.selectbox(
+                    "Επιλέξτε καθηγητή:",
+                    options=['Όλοι'] + all_instructors,
+                    index=0,
+                    key="instructor_filter"
+                )
+            
+            with col2:
+                # Στατιστικά
+                if selected_instructor == 'Όλοι':
+                    st.metric("Σύνολο Καθηγητών", len(all_instructors))
+                    st.metric("Σύνολο Μαθημάτων", len(df_instructors))
+                else:
+                    df_selected = df_instructors[df_instructors['Καθηγητής'] == selected_instructor]
+                    st.metric("Μαθήματα", len(df_selected))
+                    unique_courses = df_selected['Κωδικός'].nunique()
+                    st.metric("Μοναδικά Μαθήματα", unique_courses)
+            
+            # Εμφάνιση πίνακα
+            st.markdown("---")
+            
+            if selected_instructor == 'Όλοι':
+                # Εμφάνιση ομαδοποιημένα ανά καθηγητή
+                for instructor in all_instructors:
+                    df_instr = df_instructors[df_instructors['Καθηγητής'] == instructor]
+                    
+                    # Υπολογισμός συνολικών ωρών (αφαίρεση 'h' από τη στήλη Διάρκεια)
+                    total_hours = df_instr['Διάρκεια'].apply(lambda x: int(str(x).replace('h', '')) if pd.notna(x) and str(x).strip() else 0).sum()
+                    
+                    with st.expander(f"📚 {instructor} ({total_hours} ώρες)", expanded=False):
+                        st.dataframe(
+                            df_instr.drop(columns=['Καθηγητής']),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+            else:
+                # Εμφάνιση για επιλεγμένο καθηγητή
+                df_selected = df_instructors[df_instructors['Καθηγητής'] == selected_instructor]
+                
+                st.subheader(f"Μαθήματα: {selected_instructor}")
+                st.dataframe(
+                    df_selected.drop(columns=['Καθηγητής']),
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Ανάλυση ανά εξάμηνο
+                st.markdown("#### Κατανομή ανά Εξάμηνο Σπουδών")
+                semester_counts = df_selected.groupby('Εξάμηνο').size().reset_index(name='Πλήθος')
+                
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.dataframe(semester_counts, hide_index=True, use_container_width=True)
+                with col2:
+                    st.bar_chart(semester_counts.set_index('Εξάμηνο'))
     
     with tab_export:
         st.subheader("Εξαγωγή Εβδομαδιαίου Προγράμματος")
