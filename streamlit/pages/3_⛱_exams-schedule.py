@@ -117,7 +117,7 @@ def reload():
     st.cache_data.clear()
 
 
-def create_weekly_calendar_document(df: pd.DataFrame) -> bytes:
+def create_weekly_calendar_document(df: pd.DataFrame, include_epitirites: bool = True) -> bytes:
     """Δημιουργεί Word έγγραφο με εβδομαδιαίο πρόγραμμα εξετάσεων σε μορφή ημερολογίου"""
     doc = Document()
     
@@ -236,7 +236,8 @@ def create_weekly_calendar_document(df: pd.DataFrame) -> bytes:
                     'semester': f"Εξάμ.{int(exam['semester'])}" if pd.notna(exam['semester']) else '',
                     'course': str(exam['course_name']) if pd.notna(exam['course_name']) else '',
                     'instructor': f'({str(exam['instructor'])})' if pd.notna(exam['instructor']) else '',
-                    'room': str(exam['room']) if pd.notna(exam['room']) else ''
+                    'room': str(exam['room']) if pd.notna(exam['room']) else '',
+                    'epitirites': f'Επιτηρητές: [{str(exam['epitirites'])}]' if pd.notna(exam['epitirites']) else ''
                 })
         
         # Συμπλήρωση κελιών με όλες τις εξετάσεις
@@ -275,6 +276,8 @@ def create_weekly_calendar_document(df: pd.DataFrame) -> bytes:
                 exam_text = f"{exam['semester']} - {exam['course']}\n{exam['instructor']}"
                 if exam['room']:
                     exam_text += f"\n{exam['room']}"
+                if include_epitirites and exam['epitirites']:
+                    exam_text += f"\n{exam['epitirites']}"
                 cell_content.append(exam_text)
             
             # Ενωση με διαχωριστικό γραμμή
@@ -507,6 +510,14 @@ with tab_export_weekly:
             key="export_week_filter"
         )
     
+    # Checkbox για επιτηρητές
+    include_epitirites = st.checkbox(
+        "Συμπερίληψη επιτηρητών στο αρχείο Word",
+        value=True,
+        key="include_epitirites_checkbox",
+        help="Επιλέξτε αν θέλετε να περιλαμβάνονται οι επιτηρητές στο εξαγόμενο αρχείο"
+    )
+    
     # Φιλτράρισμα δεδομένων
     df_export = df.copy()
     
@@ -525,7 +536,7 @@ with tab_export_weekly:
     if not df_export.empty:
         st.dataframe(
             df_export[['exam_date', 'day_of_week', 'start_time', 'semester', 
-                       'course_name', 'instructor', 'room']].sort_values(by=['exam_date', 'start_time']),
+                       'course_name', 'instructor', 'room', 'epitirites']].sort_values(by=['exam_date', 'start_time']),
             height=400
         )
         
@@ -533,7 +544,7 @@ with tab_export_weekly:
         st.markdown("### Λήψη Αρχείου")
         
         try:
-            word_file = create_weekly_calendar_document(df_export)
+            word_file = create_weekly_calendar_document(df_export, include_epitirites=include_epitirites)
             
             # Όνομα αρχείου με ημερομηνία
             filename = f"Πρόγραμμα_Εξετάσεων_{program_selection}_{exam_period}.docx"
