@@ -54,7 +54,7 @@ def load_data() -> pd.DataFrame:
             st.info(f"Διαθέσιμα sheets: {', '.join(available_sheets)}")
             st.stop()
         
-        df = pd.read_excel(INPUT_EXCEL, sheet_name=INPUT_SHEET)
+        df = pd.read_excel(INPUT_EXCEL, sheet_name=INPUT_SHEET, usecols="A:I")
     except Exception as e:
         st.error(f"❌ Σφάλμα κατά το άνοιγμα του αρχείου: {e}")
         st.stop()
