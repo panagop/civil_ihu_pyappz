@@ -305,11 +305,12 @@ def create_weekly_calendar_document(df: pd.DataFrame, include_epitirites: bool =
     return buffer.getvalue()
 
 
-tab_full_table, tab_instructor_filter, tab_semester_filter, tab_calendar, tab_export_weekly = st.tabs(
+tab_full_table, tab_instructor_filter, tab_semester_filter, tab_epitiritis_filter, tab_calendar, tab_export_weekly = st.tabs(
     [
         "Πλήρης Πίνακας Εξετάσεων",
         "Φιλτράρισμα κατά Διδάσκοντα",
         "Φιλτράρισμα κατά Εξάμηνο",
+        "Φιλτράρισμα κατά Επιτηρητή",
         "Ημερολόγιο Εξετάσεων",
         "Εξαγωγή Εβδομαδιαίου Προγράμματος"
     ]
@@ -357,6 +358,44 @@ with tab_semester_filter:
     display_cols = [col for col in df_sem.columns if col not in ['start_dt', 'iso_week_number']]
     st.dataframe(df_sem[display_cols], height=600)    
 
+with tab_epitiritis_filter:
+    # Get unique epitirites values, handling NaN and splitting comma-separated values
+    epitirites_list = []
+    for val in df["epitirites"].dropna().unique():
+        # Split by comma if multiple epitirites per exam
+        if pd.notna(val):
+            epitirites_list.extend([e.strip() for e in str(val).split(',')])
+    
+    # Get unique and sorted list
+    epitirites_unique = sorted(list(set(epitirites_list)))
+    
+    if epitirites_unique:
+        selected_epitiritis = st.selectbox(
+            "Επιλέξτε επιτηρητή για φιλτράρισμα:",
+            options=epitirites_unique
+        )
+        
+        # Filter rows where selected epitiritis appears (handling comma-separated values)
+        df_epit = df[df["epitirites"].apply(
+            lambda x: selected_epitiritis in str(x) if pd.notna(x) else False
+        )].sort_values(by=["start_dt"])
+        
+        st.subheader(f"Πρόγραμμα Επιτηρήσεων - {selected_epitiritis}")
+        
+        # Απόκρυψη βοηθητικών στηλών
+        display_cols = [col for col in df_epit.columns if col not in ['start_dt', 'iso_week_number']]
+        st.dataframe(df_epit[display_cols], height=600)
+        
+        # Statistics
+        st.markdown("### Στατιστικά")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Συνολικές Επιτηρήσεις", len(df_epit))
+        with col2:
+            unique_weeks = df_epit['week_number'].nunique()
+            st.metric("Εβδομάδες με Επιτηρήσεις", unique_weeks)
+    else:
+        st.warning("⚠️ Δεν βρέθηκαν δεδομένα επιτηρητών στο αρχείο.")
 
 with tab_calendar:
     st.subheader("Ημερολόγιο Εξετάσεων")
