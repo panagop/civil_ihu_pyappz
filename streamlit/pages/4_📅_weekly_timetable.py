@@ -233,37 +233,33 @@ def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
                     if (time_idx, day_idx, 0) in processed_cells:
                         continue
                     
-                    # 0 ή 1 μάθημα
+                    # 0 ή 1 μάθημα - merge across all sub-columns
                     if len(classes) == 1:
                         cls = classes[0]
                         duration = cls['duration']
                         
                         # Mark this cell and future rows as processed
                         for dur in range(duration):
-                            processed_cells[(time_idx + dur, day_idx, 0)] = True
+                            for sub_col_idx in range(max_simultaneous):
+                                processed_cells[(time_idx + dur, day_idx, sub_col_idx)] = True
                         
-                        # Get the starting cell
-                        cell = table.rows[row_idx].cells[start_col]
+                        # Collect all cells to merge into one rectangular region
+                        cells_to_merge = []
+                        for dur_offset in range(duration):
+                            if time_idx + dur_offset < len(time_slots):
+                                for sub_col_offset in range(max_simultaneous):
+                                    cells_to_merge.append(table.rows[row_idx + dur_offset].cells[start_col + sub_col_offset])
                         
-                        # First merge horizontally across sub-columns for this row
-                        if max_simultaneous > 1:
-                            for sub_col in range(1, max_simultaneous):
-                                cell.merge(table.rows[row_idx].cells[start_col + sub_col])
+                        # Start with first cell
+                        cell = cells_to_merge[0]
                         
-                        # Then merge vertically for duration
-                        if duration > 1:
-                            for dur_offset in range(1, duration):
-                                if time_idx + dur_offset < len(time_slots):
-                                    next_row = row_idx + dur_offset
-                                    next_cell = table.rows[next_row].cells[start_col]
-                                    
-                                    # Merge horizontal sub-columns first for the next row
-                                    if max_simultaneous > 1:
-                                        for sub_col in range(1, max_simultaneous):
-                                            next_cell.merge(table.rows[next_row].cells[start_col + sub_col])
-                                    
-                                    # Now merge vertically
-                                    cell.merge(next_cell)
+                        # Merge all cells in the rectangular region
+                        for merge_cell in cells_to_merge[1:]:
+                            if merge_cell != cell:  # Don't merge with itself
+                                try:
+                                    cell.merge(merge_cell)
+                                except Exception:
+                                    pass  # Skip if already merged
                         
                         class_text = f"{cls['course']}\n{cls['instructor']}"
                         if cls['room']:
@@ -276,11 +272,20 @@ def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
                                 run.font.name = 'Calibri'
                                 run.font.size = Pt(8)
                     else:
-                        # Κενό κελί - merge όλες τις υπο-στήλες
-                        cell = table.rows[row_idx].cells[start_col]
+                        # Κενό κελί - merge horizontally across sub-columns
+                        # Mark all sub-columns as processed to avoid double-processing
+                        for sub_col_idx in range(max_simultaneous):
+                            processed_cells[(time_idx, day_idx, sub_col_idx)] = True
+                        
+                        # Merge across all sub-columns for this row only
                         if max_simultaneous > 1:
-                            for sub_col in range(1, max_simultaneous):
-                                cell.merge(table.rows[row_idx].cells[start_col + sub_col])
+                            cell = table.rows[row_idx].cells[start_col]
+                            for sub_col_offset in range(1, max_simultaneous):
+                                next_col_cell = table.rows[row_idx].cells[start_col + sub_col_offset]
+                                try:
+                                    cell.merge(next_col_cell)
+                                except Exception:
+                                    pass  # Skip if already merged
                 else:
                     # Πολλαπλά μαθήματα - ξεχωριστό κελί για καθένα
                     for cls_idx, cls in enumerate(classes[:max_simultaneous]):
@@ -301,7 +306,11 @@ def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
                         if duration > 1:
                             for dur_offset in range(1, duration):
                                 if time_idx + dur_offset < len(time_slots):
-                                    cell.merge(table.rows[row_idx + dur_offset].cells[col])
+                                    next_cell = table.rows[row_idx + dur_offset].cells[col]
+                                    try:
+                                        cell.merge(next_cell)
+                                    except Exception:
+                                        pass  # Skip if already merged
                         
                         class_text = f"{cls['course']}\n{cls['instructor']}"
                         if cls['room']:
@@ -313,13 +322,6 @@ def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
                             for run in paragraph.runs:
                                 run.font.name = 'Calibri'
                                 run.font.size = Pt(8)
-                    
-                    # Merge empty sub-columns if any
-                    if len(classes) < max_simultaneous and (time_idx, day_idx, len(classes)) not in processed_cells:
-                        remaining_start = start_col + len(classes)
-                        remaining_cell = table.rows[row_idx].cells[remaining_start]
-                        for sub_col in range(len(classes) + 1, max_simultaneous):
-                            remaining_cell.merge(table.rows[row_idx].cells[start_col + sub_col])
         
         # Εφαρμογή χρωμάτων
         from docx.oxml import OxmlElement
