@@ -31,7 +31,7 @@ st.markdown(f"Έχετε επιλέξει το πρόγραμμα σπουδών
 # ------------ ΡΥΘΜΙΣΕΙΣ ΧΡΗΣΤΗ ------------
 # INPUT_EXCEL = "lessons-calendars.xlsm"   # το αρχείο όπου έχεις το sheet Data
 INPUT_SHEET = program_selection
-INPUT_EXCEL = Path(__file__).parent.parent.parent / "files" / "exams" / "exams-2026-01.xlsm"
+INPUT_EXCEL = Path(__file__).parent.parent.parent / "files" / "exams" / "exams-2026-06.xlsm"
 
 
 # @st.cache_data
