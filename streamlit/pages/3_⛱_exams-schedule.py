@@ -8,7 +8,7 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 
-exam_period = "Χειμερινό Εξάμηνο 2025-2026"
+exam_period = "Εαρινό Εξάμηνο 2025-2026"
 
 st.set_page_config(
     layout="wide",
