@@ -95,6 +95,18 @@ def load_data() -> pd.DataFrame:
     # Αν start_time είναι string τύπου "09:00"
     df["start_time"] = df["start_time"].astype(str)
 
+    # room / course_id can mix numeric codes (e.g. 101) and strings (e.g. "ΔΟΜ704");
+    # normalize to string so pyarrow doesn't infer int64 and fail on the strings.
+    def _to_str(v):
+        if pd.isna(v):
+            return ""
+        if isinstance(v, float) and v.is_integer():
+            return str(int(v))
+        return str(v)
+
+    df["room"] = df["room"].apply(_to_str)
+    df["course_id"] = df["course_id"].apply(_to_str)
+
     # Συνένωση σε datetime για αρχή
     df["start_dt"] = pd.to_datetime(
         df["exam_date"].astype(str) + " " + df["start_time"],

@@ -83,6 +83,18 @@ def load_data() -> pd.DataFrame:
         # Φιλτράρισμα με βάση το teaching_period
         df = df[df['teaching_period'] == period_selection]
 
+        # room / course_id can mix numeric codes (e.g. 101) and strings (e.g. "ΔΟΜ704");
+        # normalize to string so pyarrow doesn't infer int64 and fail on the strings.
+        def _to_str(v):
+            if pd.isna(v):
+                return ""
+            if isinstance(v, float) and v.is_integer():
+                return str(int(v))
+            return str(v)
+
+        df["room"] = df["room"].apply(_to_str)
+        df["course_id"] = df["course_id"].apply(_to_str)
+
         # Δημιουργία συνδυαστικής στήλης για καλύτερη αναγνώριση
         df['full_class_name'] = df.apply(
             lambda row: f"{row['course_name']} - {row['class_name']}"
@@ -397,7 +409,7 @@ try:
                         'teaching_period', 'instructors', 'day', 'start_time', 'end_time',
                         'duration', 'room', 'notes']
         available_cols = [col for col in display_cols if col in df.columns]
-        st.dataframe(df[available_cols], use_container_width=True)
+        st.dataframe(df[available_cols], width='stretch')
 
     with tab_calendar:
         st.markdown("### Εβδομαδιαίο Πρόγραμμα")
@@ -831,7 +843,7 @@ try:
                     with st.expander(f"📚 {instructor} ({total_hours} ώρες)", expanded=False):
                         st.dataframe(
                             df_instr.drop(columns=['Καθηγητής']),
-                            use_container_width=True,
+                            width='stretch',
                             hide_index=True
                         )
             else:
@@ -842,7 +854,7 @@ try:
                 st.subheader(f"Μαθήματα: {selected_instructor}")
                 st.dataframe(
                     df_selected.drop(columns=['Καθηγητής']),
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True
                 )
 
@@ -854,7 +866,7 @@ try:
                 col1, col2 = st.columns([1, 2])
                 with col1:
                     st.dataframe(semester_counts, hide_index=True,
-                                 use_container_width=True)
+                                 width='stretch')
                 with col2:
                     st.bar_chart(semester_counts.set_index('Εξάμηνο'))
 

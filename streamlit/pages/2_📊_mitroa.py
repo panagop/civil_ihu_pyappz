@@ -91,7 +91,7 @@ with tab_reports:
     # st.write(codes_external_synafous)
     # st.write(codes)
 
-    df_antikeimeno_selected = df_eklektores[df_eklektores.index.isin(codes)]
+    df_antikeimeno_selected = df_eklektores[df_eklektores.index.isin(codes)].copy()
 
     df_antikeimeno_selected['Χαρακτηρισμός'] = np.where(df_antikeimeno_selected.index.isin(codes_external_idiou), 'Ιδίου', 'Συναφούς')
     df_antikeimeno_selected = df_antikeimeno_selected.fillna('')
