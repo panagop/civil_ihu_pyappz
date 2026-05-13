@@ -5,20 +5,15 @@ import pandas as pd
 import streamlit as st
 from streamlit_calendar import calendar
 
-from lib.timetable_data import load_data
-from lib.timetable_export import create_weekly_timetable_document
+from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS
+from utils.timetable_data import load_data
+from utils.timetable_export import create_weekly_timetable_document
 
 st.set_page_config(
     layout="wide",
     page_title="Εβδομαδιαίο Πρόγραμμα Μαθημάτων",
     page_icon="📅",
 )
-
-# Χρώματα ανά εξάμηνο σπουδών
-SEMESTER_COLORS = {
-    1: '#E74C3C',  2: '#3498DB',  3: '#2ECC71',  4: '#F39C12',  5: '#9B59B6',
-    6: '#1ABC9C',  7: '#E67E22',  8: '#34495E',  9: '#16A085',  10: '#D35400',
-}
 
 st.title("📅 Εβδομαδιαίο Πρόγραμμα Μαθημάτων")
 
@@ -106,7 +101,7 @@ try:
                     room = clean_text(row['room'])
                     semester = int(row['semester']) if pd.notna(row['semester']) else 1
 
-                    color = SEMESTER_COLORS.get(semester, '#95A5A6')
+                    color = SEMESTER_COLORS.get(semester, DEFAULT_SEMESTER_COLOR)
 
                     title_parts = [full_class_name]
                     if instructors:
@@ -251,7 +246,7 @@ try:
                         instructors = clean_text_room(row['instructors'])
                         semester = int(row['semester']) if pd.notna(row['semester']) else 1
 
-                        color = SEMESTER_COLORS.get(semester, '#95A5A6')
+                        color = SEMESTER_COLORS.get(semester, DEFAULT_SEMESTER_COLOR)
 
                         title_parts = [full_class_name]
                         if instructors:

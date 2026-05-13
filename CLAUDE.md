@@ -68,18 +68,11 @@ Update these paths inside the page files when switching academic year:
 
 These are planned refactors (no functionality changes):
 
-1. **Split large page files** — `3_⛱_exams-schedule.py` and `4_📅_weekly_timetable.py` are 750+ lines; extract data loading, Word export, and calendar logic into sibling modules.
-2. **Remove legacy `civil_ihu_pyappz/perigrammata.py`** — dead code, duplicates page 1.
-3. **Delete commented-out dead code** in exams-schedule.py.
-4. **Guard `.iloc[0]` calls** — add `.empty` checks before row access to prevent crashes.
-5. **Wrap Excel loading in try/except** — show `st.error()` if file is missing or locked.
-6. **Guard `st.secrets` access** — use `.get()` with a friendly error if secrets are missing.
-7. **Centralise semester color map** — currently duplicated in pages 3 and 4.
-8. **Replace magic strings with constants** — column names, time slots, file paths.
-9. **Add type hints** to key functions (especially Word export helpers).
-10. **Extract Word export logic** into standalone functions (currently embedded in button handlers) so they can be unit-tested.
-11. **Add smoke tests** for document generation.
-12. **Move active file paths to a config section** so year updates are a single-line change.
+1. **Remove legacy `civil_ihu_pyappz/perigrammata.py`** — dead code, duplicates page 1.
+2. **Delete commented-out dead code** in exams-schedule.py.
+3. **Replace magic strings with constants** — column names, time slots, file paths.
+4. **Add smoke tests** for document generation.
+5. **Move active file paths to a config section** so year updates are a single-line change.
 
 ## Notes
 

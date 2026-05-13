@@ -5,8 +5,9 @@ import pandas as pd
 import streamlit as st
 from streamlit_calendar import calendar
 
-from lib.exams_data import load_data
-from lib.exams_export import create_weekly_calendar_document
+from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS
+from utils.exams_data import load_data
+from utils.exams_export import create_weekly_calendar_document
 
 st.set_page_config(
     layout="wide",
@@ -157,19 +158,6 @@ with tab_calendar:
         }
     }
 
-    semester_colors = {
-        1: '#E74C3C',
-        2: '#3498DB',
-        3: '#2ECC71',
-        4: '#F39C12',
-        5: '#9B59B6',
-        6: '#1ABC9C',
-        7: '#E67E22',
-        8: '#34495E',
-        9: '#16A085',
-        10: '#D35400',
-    }
-
     calendar_events = []
     for _, row in df_calendar.iterrows():
         if pd.notna(row["start_dt"]):
@@ -191,10 +179,20 @@ with tab_calendar:
             semester = int(row['semester']) if pd.notna(row['semester']) else 1
             semester_str = str(semester)
 
-            color = semester_colors.get(semester, '#95A5A6')
+            color = SEMESTER_COLORS.get(semester, DEFAULT_SEMESTER_COLOR)
+
+            students_raw = row.get(extra_column) if extra_column else None
+            if pd.notna(students_raw):
+                try:
+                    students_str = str(int(float(students_raw)))
+                except (TypeError, ValueError):
+                    students_str = str(students_raw)
+                students_suffix = '\n' + f'Αρ. Φοιτ. {students_str}'
+            else:
+                students_suffix = ''
 
             event = {
-                "title": f'Εξ.{semester_str} - {course_name} - {instructor}',
+                "title": f'Εξ.{semester_str} - {course_name} - {instructor}{students_suffix}',
                 "start": start_str,
                 "end": end_str,
                 "color": color
@@ -215,11 +213,53 @@ with tab_calendar:
             st.session_state.show_exam_calendar = True
             st.rerun()
 
+    # On hover, expand the event box to full column width and lift it above the
+    # others so the entire title is readable — including when multiple exams
+    # share the same time slot (FullCalendar splits the cell horizontally).
+    exam_calendar_css = """
+        .fc-event { cursor: pointer; }
+
+        /* Honor newlines (\\n) in event titles so multi-line text renders. */
+        .fc-event-title {
+            white-space: pre-line !important;
+        }
+
+        /* Hovered event jumps in front of its neighbours */
+        .fc-timegrid-event-harness:hover,
+        .fc-daygrid-event:hover {
+            z-index: 1000 !important;
+        }
+
+        /* Stretch the hovered harness back to the full column width so split
+           cells (overlapping exams) become readable. */
+        .fc-timegrid-event-harness:hover {
+            inset-inline-start: 0 !important;
+            inset-inline-end: 0 !important;
+            right: 0 !important;
+            left: 0 !important;
+            width: auto !important;
+        }
+        .fc-timegrid-event-harness:hover > .fc-timegrid-event {
+            width: auto !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Let the title wrap inside the now-wider box */
+        .fc-event:hover .fc-event-title,
+        .fc-event:hover .fc-event-main,
+        .fc-event:hover .fc-event-main-frame {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+    """
+
     if st.session_state.show_exam_calendar:
         if calendar_events:
             calendar_data = calendar(
                 events=calendar_events,
-                options=calendar_options
+                options=calendar_options,
+                custom_css=exam_calendar_css,
             )
         else:
             st.info("Δεν υπάρχουν εξετάσεις για εμφάνιση με τα επιλεγμένα φίλτρα.")

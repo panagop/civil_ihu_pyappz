@@ -27,12 +27,12 @@ def load_gsheet(sheet_name) -> pd.DataFrame:
     return df
 
 
-def reload():
+def reload() -> None:
     """Clear cache to force reload from Google Sheets"""
     st.cache_data.clear()
 
 
-def get_data():
+def get_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Get current data from both sheets"""
     df_eklektores = load_gsheet('eklektores')
     df_antikeimena = load_gsheet('antikeimena')
@@ -72,12 +72,14 @@ with tab_statistics:
     st.bar_chart(df_antikeimena['Επιστημονικό πεδίο'].value_counts())
 
 
-def get_codes_for_eklektores(df: pd.DataFrame, charaktirismos: str, selected_antikeimeno:str) -> list[int]:
-    codes = df[df['Γνωστικό αντικείμενο'] == selected_antikeimeno][charaktirismos].values[0].split('-')
-    if '' in codes: 
+def get_codes_for_eklektores(df: pd.DataFrame, charaktirismos: str, selected_antikeimeno: str) -> list[int]:
+    matching = df[df['Γνωστικό αντικείμενο'] == selected_antikeimeno][charaktirismos]
+    if matching.empty:
+        return []
+    codes = matching.values[0].split('-')
+    if '' in codes:
         codes.remove('')
-    codes = [int(i) for i in codes]
-    return codes
+    return [int(i) for i in codes]
 
 
 with tab_reports:
