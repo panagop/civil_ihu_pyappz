@@ -16,8 +16,24 @@ import streamlit as st
 ALLOWED_EMAIL_SUFFIX = "@ihu.gr"
 
 
+def _allowed_emails() -> set[str]:
+    """Lower-cased set of explicitly allowlisted emails from secrets.toml.
+
+    If the `allowed_emails` key is missing/empty, only the domain-suffix
+    check applies (any @ihu.gr account works).
+    """
+    raw = st.secrets.get("allowed_emails", [])
+    return {e.strip().lower() for e in raw if e and e.strip()}
+
+
 def _email_allowed(email: str | None) -> bool:
-    return bool(email) and email.lower().endswith(ALLOWED_EMAIL_SUFFIX)
+    if not email:
+        return False
+    email = email.lower()
+    if not email.endswith(ALLOWED_EMAIL_SUFFIX):
+        return False
+    allowlist = _allowed_emails()
+    return not allowlist or email in allowlist
 
 
 def is_authorized() -> bool:
@@ -49,7 +65,7 @@ def require_ihu_login() -> None:
     if not _email_allowed(email):
         st.error(
             f"Ο λογαριασμός **{email or 'άγνωστος'}** δεν έχει πρόσβαση. "
-            f"Απαιτείται email που λήγει σε {ALLOWED_EMAIL_SUFFIX}."
+            "Επικοινωνήστε με τον διαχειριστή αν χρειάζεστε πρόσβαση."
         )
         if st.button("Αποσύνδεση"):
             st.logout()
@@ -75,7 +91,7 @@ def render_login_block() -> None:
     if not _email_allowed(email):
         st.error(
             f"Ο λογαριασμός **{email or 'άγνωστος'}** δεν έχει πρόσβαση. "
-            f"Απαιτείται email που λήγει σε {ALLOWED_EMAIL_SUFFIX}."
+            "Επικοινωνήστε με τον διαχειριστή αν χρειάζεστε πρόσβαση."
         )
         if st.button("Αποσύνδεση"):
             st.logout()
