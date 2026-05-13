@@ -13,12 +13,5 @@ warnings.filterwarnings(
     module="openpyxl",
 )
 
-# docxcompose still imports the deprecated pkg_resources API; nothing we can do
-# until upstream migrates.
-warnings.filterwarnings(
-    "ignore",
-    message="pkg_resources is deprecated as an API.*",
-    category=UserWarning,
-)
 
 st.set_page_config(page_title="Περιγράμματα μαθημάτων", page_icon=":house:", initial_sidebar_state="expanded")
