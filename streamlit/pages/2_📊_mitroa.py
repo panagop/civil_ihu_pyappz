@@ -1,4 +1,7 @@
-﻿import streamlit as st
+﻿import sys
+from pathlib import Path
+
+import streamlit as st
 import pandas as pd
 import numpy as np
 import io
@@ -6,6 +9,11 @@ import io
 st.set_page_config(
     layout="wide",
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from auth import require_ihu_login  # noqa: E402
+
+require_ihu_login()
 
 # Load Google Sheets ID from secrets
 try:

@@ -51,9 +51,21 @@ gsheets_id_perigrammata = "..."
 gsheets_id_mitroa_eklektores = "..."
 gsheets_id_mitroa_antikeimena = "..."
 # add any other Sheet IDs used by the pages
+
+# Microsoft Entra ID OIDC — required for pages 1 (perigrammata) and 2 (mitroa).
+# Restricted to @ihu.gr accounts by streamlit/auth.py.
+[auth]
+redirect_uri = "http://localhost:8501/oauth2callback"
+cookie_secret = "<generate: python -c \"import secrets; print(secrets.token_hex(32))\">"
+client_id = "<Application (client) ID from Azure>"
+client_secret = "<client secret value from Azure>"
+server_metadata_url = "https://login.microsoftonline.com/<TENANT_ID>/v2.0/.well-known/openid-configuration"
+client_kwargs = { prompt = "select_account" }
 ```
 
 The Google Sheets are accessed as public CSV exports (no OAuth needed, just the sheet IDs).
+
+Auth for protected pages uses Streamlit's native OIDC (`st.login()`, requires Streamlit >= 1.42) against an Entra ID app registration. The redirect URI must be added to the Azure app registration; for production, also add the deployed URL.
 
 ## Active data files
 

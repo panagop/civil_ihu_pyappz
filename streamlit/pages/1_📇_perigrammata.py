@@ -1,4 +1,7 @@
-﻿import streamlit as st
+﻿import sys
+from pathlib import Path
+
+import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
 import io
@@ -7,6 +10,11 @@ import requests
 st.set_page_config(
     layout="wide",
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from auth import require_ihu_login  # noqa: E402
+
+require_ihu_login()
 
 # Session state
 if 'lang' not in st.session_state:
