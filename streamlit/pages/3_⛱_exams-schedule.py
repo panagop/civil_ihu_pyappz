@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+﻿from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -6,7 +6,7 @@ import streamlit as st
 from streamlit_calendar import calendar
 
 from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS
-from utils.exams_data import load_data
+from utils.exams_data import default_period_index, discover_exam_periods, load_data
 from utils.exams_export import create_weekly_calendar_document
 
 st.set_page_config(
@@ -15,14 +15,26 @@ st.set_page_config(
     page_icon="🗓️",
 )
 
-period_selection: str = st.radio(
-    "Επιλέξτε εξάμηνο:",
-    options=["Χειμερινό", "Εαρινό"],
-    index=1,
-    key="exams_period_selection",
-)
+EXAMS_DIR = Path(__file__).parent.parent.parent / "files" / "exams"
 
-exam_period = f"{period_selection} Εξάμηνο 2025-2026"
+exam_periods = discover_exam_periods(EXAMS_DIR)
+if not exam_periods:
+    st.error(
+        "❌ Δεν βρέθηκαν αρχεία εξεταστικής (exams-yyyy-mm.xlsm) στον φάκελο files/exams."
+    )
+    st.stop()
+
+period_labels = [p["label"] for p in exam_periods]
+selected_label: str = st.radio(
+    "Επιλέξτε εξεταστική περίοδο:",
+    options=period_labels,
+    index=default_period_index(exam_periods),
+    key="exams_period_file",
+)
+selected_period = exam_periods[period_labels.index(selected_label)]
+
+period_selection = selected_period["name"]
+exam_period = f"{selected_period['name']} {selected_period['academic_year']}"
 
 st.title(f"🗓️ Πρόγραμμα Εξετάσεων - {exam_period}")
 
@@ -36,7 +48,7 @@ program_selection: str = st.radio(
 st.markdown(f"Έχετε επιλέξει το πρόγραμμα σπουδών: **{program_selection}**")
 
 INPUT_SHEET = program_selection
-INPUT_EXCEL = Path(__file__).parent.parent.parent / "files" / "exams" / "exams-2026-06.xlsm"
+INPUT_EXCEL = selected_period["path"]
 
 
 tab_full_table, tab_instructor_filter, tab_semester_filter, tab_epitiritis_filter, tab_calendar, tab_export_weekly = st.tabs(
@@ -331,7 +343,7 @@ with tab_export_weekly:
                 include_epitirites=include_epitirites,
             )
 
-            filename = f"Πρόγραμμα_Εξετάσεων_{program_selection}_{period_selection}_2025-2026.docx"
+            filename = f"Πρόγραμμα_Εξετάσεων_{program_selection}_{period_selection}_{selected_period['academic_year']}.docx"
 
             st.download_button(
                 label="📥 Λήψη Word Αρχείου",

@@ -1,7 +1,127 @@
+import re
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+EXAM_FILE_RE = re.compile(r"exams-(\d{4})-(\d{2})\.xlsm$", re.IGNORECASE)
+
+GREEK_MONTHS_GENITIVE = {
+    1: "Ιανουαρίου",
+    2: "Φεβρουαρίου",
+    3: "Μαρτίου",
+    4: "Απριλίου",
+    5: "Μαΐου",
+    6: "Ιουνίου",
+    7: "Ιουλίου",
+    8: "Αυγούστου",
+    9: "Σεπτεμβρίου",
+    10: "Οκτωβρίου",
+    11: "Νοεμβρίου",
+    12: "Δεκεμβρίου",
+}
+
+
+def _period_name(month: int) -> str:
+    """Greek name of the exam period implied by its month."""
+    if month in (1, 2):
+        return "Χειμερινό"
+    if month in (6, 7):
+        return "Εαρινό"
+    if month in (8, 9):
+        return "Επαναληπτική Σεπτεμβρίου"
+    return "Εξεταστική"
+
+
+def _academic_year(year: int, month: int) -> str:
+    """Academic year string (e.g. "2025-2026"); the year rolls over in September."""
+    start = year if month >= 9 else year - 1
+    return f"{start}-{start + 1}"
+
+
+@st.cache_data(show_spinner=False)
+def _exam_date_range(input_excel_str: str) -> tuple[date | None, date | None]:
+    """(min, max) exam_date in the file, read from the first sheet that has it."""
+    path = Path(input_excel_str)
+    try:
+        excel_file = pd.ExcelFile(path)
+    except Exception:
+        return None, None
+
+    sheets = list(dict.fromkeys(["ΔΙΠΑΕ", "ΤΕΙ", *excel_file.sheet_names]))
+    for sheet in sheets:
+        if sheet not in excel_file.sheet_names:
+            continue
+        try:
+            df = pd.read_excel(path, sheet_name=sheet)
+        except Exception:
+            continue
+        if "exam_date" not in df.columns:
+            continue
+        dates = pd.to_datetime(df["exam_date"], errors="coerce").dropna()
+        if dates.empty:
+            continue
+        return dates.min().date(), dates.max().date()
+
+    return None, None
+
+
+def discover_exam_periods(exams_dir: Path) -> list[dict]:
+    """Find ``exams-yyyy-mm.xlsm`` files and return metadata sorted chronologically."""
+    periods: list[dict] = []
+    for path in exams_dir.glob("exams-*.xlsm"):
+        match = EXAM_FILE_RE.search(path.name)
+        if not match:
+            continue
+        year, month = int(match.group(1)), int(match.group(2))
+        start_date, end_date = _exam_date_range(str(path))
+        name = _period_name(month)
+        academic_year = _academic_year(year, month)
+        periods.append(
+            {
+                "path": path,
+                "year": year,
+                "month": month,
+                "name": name,
+                "academic_year": academic_year,
+                "label": f"{name} {academic_year} ({GREEK_MONTHS_GENITIVE[month]} {year})",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        )
+
+    periods.sort(key=lambda p: (p["year"], p["month"]))
+    return periods
+
+
+def default_period_index(periods: list[dict], today: date | None = None) -> int:
+    """Index of the period to preselect.
+
+    Preference order: the period currently in progress (today within its exam-date
+    range), otherwise the next upcoming period, otherwise the most recent one.
+    """
+    if not periods:
+        return 0
+    today = today or date.today()
+
+    # Period currently in progress.
+    for idx, p in enumerate(periods):
+        start, end = p["start_date"], p["end_date"]
+        if start and end and start <= today <= end:
+            return idx
+
+    # Next upcoming period (earliest start date in the future).
+    upcoming = [
+        (p["start_date"], idx)
+        for idx, p in enumerate(periods)
+        if p["start_date"] and p["start_date"] > today
+    ]
+    if upcoming:
+        return min(upcoming)[1]
+
+    # Fallback: most recent period (list is sorted chronologically).
+    return len(periods) - 1
 
 
 def load_data(

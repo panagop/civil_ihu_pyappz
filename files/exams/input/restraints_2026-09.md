@@ -1,0 +1,16 @@
+- The `ΔΙΠΑΕ` sheet should pull exam_date and start_time according to corresponding `ΔΙΠΑΕ` sheet in `exams-2026-06.xlsm` file Take into account the following conditions to fill the columns `exam_date` and `start_time` of exams-2026-09.xlsm       
+- Exams start at 01 Sept. 2026 and end at 23 Sept. 2026
+- Exams will not take place in the weekends
+- Exams will start at 9:00, 12:00, 15:00 or 18:00
+- Read all courses from the `all_courses.json` file in the same folder
+- The instructors for all courses are in the `ΔΙΠΑΕ` sheet of the `exams-2026-09.xlsm` file
+- For courses that have no instructor, no exam date need to be scheduled
+- There should be no courses of the same semester with less than one free day between them. Distribute the days for all semester throughout the exams period as evenly as possible. Count the weekends as free days that students can study their next course.
+- Courses with type `ΚΥ`, `ΧΥ`,  at `all_courses.json` should be examined alone (no other course should be examined at the same time).
+- Courses with type  `ΔΥ`, `ΓΥ`, `ΣΥ`, `ΥΥ`, `ΔΕ`, `ΓΕ`, `ΣΕ`, `ΥΕ` could be examined together (at the same time), if the students of the same directon are not examined at another course of their direction at this time. the first letters `Δ`, `Γ`, `Σ`, `Υ`, stand for each direction. 
+- Instructor "Δανιήλ" should have her courses on Tuesdays and Fridays
+- Instructor "Καζαντζή" should have her courses on 02/09 to 04-09, 11/09 or 21/09-23/09
+- Instructors "Βλαχονάσιου", "Φωτοπούλου", "Δανιήλ" should not have their courses start at 18:00
+- Instructors "Μαραγκός", "Αυγέρης", "Κοκκαλά", "Κόκκινος", "Μπακάλης", "Παπαϊωάννου", "Σαπίδης", "Τσιαράπας", "Φαναραδέλλη" should have their courses grouped with 2 of them in the same day, if possible
+- Instructor "Λιαλιαμπής" should have his course in the same day with instructor "Βλαχονάσιου", the one next of the other
+- Instructor "Βοζίκης" should have his courses start at 12:00 or 15:00
