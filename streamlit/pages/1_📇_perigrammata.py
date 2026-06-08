@@ -1,4 +1,7 @@
-﻿import streamlit as st
+﻿import sys
+from pathlib import Path
+
+import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
 import io
@@ -7,6 +10,11 @@ import requests
 st.set_page_config(
     layout="wide",
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from auth import require_ihu_login  # noqa: E402
+
+require_ihu_login()
 
 # Session state
 if 'lang' not in st.session_state:
@@ -31,12 +39,12 @@ def load_gsheet(lang: str, programma_spoudon: str) -> pd.DataFrame:
     return df
 
 
-def reload_data():
+def reload_data() -> None:
     """Clear cache to force reload from Google Sheets"""
     st.cache_data.clear()
 
 
-def get_data():
+def get_data() -> pd.DataFrame:
     """Get current data based on selected language"""
     return load_gsheet(st.session_state['lang'], st.session_state['programma_spoudon'])
 
@@ -44,7 +52,7 @@ def get_data():
 st.sidebar.button('Ενημέρωση από Google Sheets', on_click=reload_data)
 
 
-def replace_none_with_empty_str(some_dict: dict) -> dict:
+def replace_none_with_empty_str(some_dict: dict[str, object]) -> dict[str, object]:
     return {k: ('' if v is None else v) for k, v in some_dict.items()}
 
 
@@ -76,7 +84,7 @@ tab_table, tab_statistics, tab_word_download = st.tabs(
     ["Πίνακας", "Στατιστικά", "Αρχείο word"])
 
 
-def make_word_file(row_dict: dict):
+def make_word_file(row_dict: dict[str, object]) -> bytes:
     if st.session_state['lang'] == "Ελληνικά":
         url = r"https://github.com/panagop/civil_ihu_pyappz/raw/main/files/perigrammata-template-gr.docx"
     else:

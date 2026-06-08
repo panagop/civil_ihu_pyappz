@@ -1,4 +1,7 @@
-﻿import streamlit as st
+﻿import sys
+from pathlib import Path
+
+import streamlit as st
 import pandas as pd
 import numpy as np
 import io
@@ -6,6 +9,11 @@ import io
 st.set_page_config(
     layout="wide",
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from auth import require_ihu_login  # noqa: E402
+
+require_ihu_login()
 
 # Load Google Sheets ID from secrets
 try:
@@ -27,12 +35,12 @@ def load_gsheet(sheet_name) -> pd.DataFrame:
     return df
 
 
-def reload():
+def reload() -> None:
     """Clear cache to force reload from Google Sheets"""
     st.cache_data.clear()
 
 
-def get_data():
+def get_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Get current data from both sheets"""
     df_eklektores = load_gsheet('eklektores')
     df_antikeimena = load_gsheet('antikeimena')
@@ -72,12 +80,14 @@ with tab_statistics:
     st.bar_chart(df_antikeimena['Επιστημονικό πεδίο'].value_counts())
 
 
-def get_codes_for_eklektores(df: pd.DataFrame, charaktirismos: str, selected_antikeimeno:str) -> list[int]:
-    codes = df[df['Γνωστικό αντικείμενο'] == selected_antikeimeno][charaktirismos].values[0].split('-')
-    if '' in codes: 
+def get_codes_for_eklektores(df: pd.DataFrame, charaktirismos: str, selected_antikeimeno: str) -> list[int]:
+    matching = df[df['Γνωστικό αντικείμενο'] == selected_antikeimeno][charaktirismos]
+    if matching.empty:
+        return []
+    codes = matching.values[0].split('-')
+    if '' in codes:
         codes.remove('')
-    codes = [int(i) for i in codes]
-    return codes
+    return [int(i) for i in codes]
 
 
 with tab_reports:
@@ -91,7 +101,7 @@ with tab_reports:
     # st.write(codes_external_synafous)
     # st.write(codes)
 
-    df_antikeimeno_selected = df_eklektores[df_eklektores.index.isin(codes)]
+    df_antikeimeno_selected = df_eklektores[df_eklektores.index.isin(codes)].copy()
 
     df_antikeimeno_selected['Χαρακτηρισμός'] = np.where(df_antikeimeno_selected.index.isin(codes_external_idiou), 'Ιδίου', 'Συναφούς')
     df_antikeimeno_selected = df_antikeimeno_selected.fillna('')
