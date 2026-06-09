@@ -19,7 +19,7 @@ Soft (objective, "if possible"):
   - Λιαλιαμπής on the same day as Βλαχονάσιου, in an adjacent slot.
   - Even distribution within each stream (maximise the minimum gap).
 """
-import sys, io, json
+import sys, io, json, os
 from datetime import date, timedelta
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 import pandas as pd
@@ -29,8 +29,9 @@ FILE = "files/exams/exams-2026-09.xlsm"
 START, END = date(2026, 9, 1), date(2026, 9, 23)
 SLOTS = ["09:00", "12:00", "15:00", "18:00"]          # slot index 0..3
 ELECTIVE_TYPES = {"ΔΥ", "ΓΥ", "ΣΥ", "ΥΥ", "ΔΕ", "ΓΕ", "ΣΕ", "ΥΕ"}
-GROUP_INSTR = {"Μαραγκός", "Αυγέρης", "Κοκκαλά", "Κόκκινος", "Μπακάλης",
-               "Παπαϊωάννου", "Σαπίδης", "Τσιαράπας", "Φαναραδέλλη"}
+GROUP_INSTR = {"Αυγέρης", "Κοκκαλά", "Κόκκινος", "Μπακάλης",
+               "Παπαϊωάννου", "Σαπίδης", "Τσιαράπας", "Φαναραδέλλη",
+               "Βοζίκης", "Βλαχονάσιου", "Δανιήλ", "Μιχαηλίδης"}
 
 # ---- valid days as ordinals (days since START), weekdays only ----------------
 days = [d for d in range((END - START).days + 1)
@@ -94,6 +95,8 @@ for i, c in enumerate(C):
         dom = TUE_FRI
     elif c["instr"] == "Καζαντζή":
         dom = KAZANTZI_DAYS
+    elif c["instr"] == "Λιαλιαμπής":
+        dom = [o for o in days if to_date(o) < date(2026, 9, 15)]
     dv = m.NewIntVarFromDomain(cp_model.Domain.FromValues(dom), f"day_{i}")
     if c["instr"] == "Βοζίκης":
         sv = m.NewIntVarFromDomain(cp_model.Domain.FromValues([1, 2]), f"slot_{i}")
@@ -142,6 +145,24 @@ for s in streams:
             m.AddAbsEquality(ad, diff)
             m.Add(ad >= 2)
 
+# Γαλάνης: his courses fall in two consecutive-day periods, period A spanning
+# up to 4 calendar days (day-diff <= 3) and period B up to 3 (day-diff <= 2),
+# with A entirely before B so they are two distinct blocks.
+gal = by_instr.get("Γαλάνης", [])
+if len(gal) > 1:
+    inA = {i: m.NewBoolVar(f"galA_{i}") for i in gal}
+    for a in range(len(gal)):
+        for b in range(a + 1, len(gal)):
+            i, j = gal[a], gal[b]
+            m.Add(day[i] - day[j] <= 3).OnlyEnforceIf([inA[i], inA[j]])
+            m.Add(day[j] - day[i] <= 3).OnlyEnforceIf([inA[i], inA[j]])
+            m.Add(day[i] - day[j] <= 2).OnlyEnforceIf([inA[i].Not(), inA[j].Not()])
+            m.Add(day[j] - day[i] <= 2).OnlyEnforceIf([inA[i].Not(), inA[j].Not()])
+            m.Add(day[i] < day[j]).OnlyEnforceIf([inA[i], inA[j].Not()])
+            m.Add(day[j] < day[i]).OnlyEnforceIf([inA[i].Not(), inA[j]])
+    m.Add(sum(inA[i] for i in gal) >= 1)
+    m.Add(sum(inA[i] for i in gal) <= len(gal) - 1)
+
 # even distribution (soft): flatten per-day load + cap parallelism per slot
 is_on = {}                      # is_on[i, o] == 1 iff course i is on day o
 for i in range(N):
@@ -157,6 +178,40 @@ for o in days:
     loads.append(ld)
 maxload = m.NewIntVar(0, N, "maxload")
 m.AddMaxEquality(maxload, loads)
+# hard: grouping instructors get at most 2 courses on the same day.
+# STRICT_PAIR=1  -> every used day must hold exactly 2 (no singletons at all).
+# STRICT_PAIR=2  -> mandatory pairing with at most ONE leftover single per
+#                   instructor (the only feasible form when a count is odd).
+STRICT_PAIR = os.environ.get("STRICT_PAIR", "0")
+SINGLETONS = []                          # mode 3: per-day unpaired indicators
+for instr in GROUP_INSTR:
+    ids = by_instr.get(instr, [])
+    if not ids:
+        continue
+    if STRICT_PAIR == "1":
+        for o in days:
+            b = m.NewBoolVar(f"pair_{instr}_{o}")
+            m.Add(sum(is_on[i, o] for i in ids) == 2 * b)   # cnt in {0, 2}
+    elif STRICT_PAIR in ("2", "3"):
+        ones = []
+        for o in days:
+            one = m.NewBoolVar(f"one_{instr}_{o}")
+            two = m.NewBoolVar(f"two_{instr}_{o}")
+            m.Add(sum(is_on[i, o] for i in ids) == one + 2 * two)  # cnt in {0,1,2}
+            m.Add(one + two <= 1)
+            ones.append(one)
+        if STRICT_PAIR == "2":
+            m.Add(sum(ones) <= 1)        # hard: at most one unpaired course
+        SINGLETONS.extend(ones)          # mode 3: minimise these instead
+    elif len(ids) > 2:
+        for o in days:
+            m.Add(sum(is_on[i, o] for i in ids) <= 2)
+
+# hard: Μιχαηλίδης has >= 2 courses in the first week (01-04 Sep)
+FIRST_WEEK = [o for o in days if to_date(o) <= date(2026, 9, 4)]
+mich = by_instr.get("Μιχαηλίδης", [])
+if len(mich) >= 2:
+    m.Add(sum(is_on[i, o] for i in mich for o in FIRST_WEEK) >= 2)
 # at most 4 exams running in parallel in any one day+time slot
 for o in days:
     for sl in range(4):
@@ -202,7 +257,9 @@ for li in by_instr.get("Λιαλιαμπής", []):
 
 import os
 if os.environ.get("NOOBJ") != "1":
-    m.Maximize(500 * sum(adj_terms) + 20 * sum(group_terms) + 50 * sum(obj))
+    # mode 3: dominate everything else by minimising unpaired singles
+    pair_obj = -100000 * sum(SINGLETONS) if SINGLETONS else 0
+    m.Maximize(pair_obj + 500 * sum(adj_terms) + 20 * sum(group_terms) + 50 * sum(obj))
 
 solver = cp_model.CpSolver()
 solver.parameters.max_time_in_seconds = float(os.environ.get("TLIM", "60"))
@@ -215,6 +272,8 @@ if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
 
 print(f"adjacency={sum(int(solver.Value(a)) for a in adj_terms)}/{len(adj_terms)} "
       f"grouping={sum(int(solver.Value(g)) for g in group_terms)}/{len(group_terms)}")
+if SINGLETONS:
+    print(f"unpaired singles (min): {sum(int(solver.Value(s)) for s in SINGLETONS)}")
 
 # ---- emit result -------------------------------------------------------------
 out = {}
@@ -236,3 +295,31 @@ for d, s, c in result:
 with open("files/exams/input/_schedule_out.json", "w", encoding="utf-8") as fh:
     json.dump(out, fh, ensure_ascii=False, indent=2)
 print("\nwrote files/exams/input/_schedule_out.json")
+
+# ---- write exam_date / start_time back into the ΔΙΠΑΕ sheet of the xlsm -------
+import openpyxl
+from datetime import datetime
+wb = openpyxl.load_workbook(FILE, keep_vba=True)
+ws = wb["ΔΙΠΑΕ"]
+COL_DATE, COL_TIME = 5, 6                       # E = exam_date, F = start_time
+ws.cell(row=1, column=COL_DATE).value = "exam_date"
+ws.cell(row=1, column=COL_TIME).value = "start_time"
+written = 0
+for row in range(2, ws.max_row + 1):
+    cid = ws.cell(row=row, column=1).value
+    if cid is None:
+        continue
+    cid = str(cid).strip()
+    if cid in out:
+        d_iso, t_str = out[cid]
+        cell_d = ws.cell(row=row, column=COL_DATE)
+        cell_d.value = datetime.fromisoformat(d_iso)
+        cell_d.number_format = "yyyy-mm-dd"
+        ws.cell(row=row, column=COL_TIME).value = t_str
+        written += 1
+    else:
+        # course not scheduled (no instructor): clear any stale values
+        ws.cell(row=row, column=COL_DATE).value = None
+        ws.cell(row=row, column=COL_TIME).value = None
+wb.save(FILE)
+print(f"wrote {written} exam_date/start_time rows into {FILE}")

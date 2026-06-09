@@ -1,6 +1,7 @@
 # Instructions and conditions
 
 - The `ΔΙΠΑΕ` sheet should pull exam_date and start_time according to corresponding `ΔΙΠΑΕ` sheet in `exams-2026-06.xlsm` file Take into account the following conditions to fill the columns `exam_date` and `start_time` of exams-2026-09.xlsm
+- Delete the contents of the columns `exam_date` and `start_time` of exams-2026-09.xlsm, if they are not empty
 - Exams start at 01 Sept. 2026 and end at 23 Sept. 2026
 - Exams will not take place in the weekends
 - Exams will start at 9:00, 12:00, 15:00 or 18:00
@@ -12,7 +13,10 @@
 - Courses with type  `ΔΥ`, `ΓΥ`, `ΣΥ`, `ΥΥ`, `ΔΕ`, `ΓΕ`, `ΣΕ`, `ΥΕ` could be examined together (at the same time), if the students of the same directon are not examined at another course of their direction at this time. the first letters `Δ`, `Γ`, `Σ`, `Υ`, stand for each direction.
 - Instructor "Δανιήλ" should have her courses on Tuesdays and Fridays
 - Instructor "Καζαντζή" should have her courses on 02/09 to 04-09, 11/09 or 21/09-23/09
+- Instructor "Μιχαηλίδης" should have 2 of his courses during the first week
 - Instructors "Βλαχονάσιου", "Φωτοπούλου", "Δανιήλ" should not have their courses start at 18:00
-- Instructors "Μαραγκός", "Αυγέρης", "Κοκκαλά", "Κόκκινος", "Μπακάλης", "Παπαϊωάννου", "Σαπίδης", "Τσιαράπας", "Φαναραδέλλη" should have their courses grouped with 2 of them in the same day, if possible
-- Instructor "Λιαλιαμπής" should have his course in the same day with instructor "Βλαχονάσιου", the one next to the other
+- Instructors "Αυγέρης", "Κοκκαλά", "Κόκκινος", "Μπακάλης", "Παπαϊωάννου", "Σαπίδης", "Τσιαράπας", "Φαναραδέλλη", "Βοζίκης", "Βλαχονάσιου", "Δανιήλ", "Μιχαηλίδης" should have their courses grouped with 2 of them in the same day, if possible, but not more than 2 in the same day.
+- Instructor "Γαλάνης" should have his courses grouped in 2 periods. One of them should last up to 4 continuous days (e.g. Monday to Thursday or Tuesday to Friday), and the other up to 3 days.
+- Instructor "Λιαλιαμπής" should have his course in the same day with instructor "Βλαχονάσιου", the one next to the other and before September 15. For example, one of them at 12:00 and the other at 15:00
 - Instructor "Βοζίκης" should have his courses start at 12:00 or 15:00
+- Instructor "Επιτροπή" should be counted as another instuctor
