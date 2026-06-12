@@ -12,11 +12,12 @@
 - Courses with type `ΚΥ`, `ΧΥ`,  at `all_courses.json` should be examined alone (no other course should be examined at the same time).
 - Courses with type  `ΔΥ`, `ΓΥ`, `ΣΥ`, `ΥΥ`, `ΔΕ`, `ΓΕ`, `ΣΕ`, `ΥΕ` could be examined together (at the same time), if the students of the same directon are not examined at another course of their direction at this time. the first letters `Δ`, `Γ`, `Σ`, `Υ`, stand for each direction.
 - Instructor "Δανιήλ" should have her courses on Tuesdays and Fridays
-- Instructor "Καζαντζή" should have her courses on 02/09 to 04-09, 11/09 or 21/09-23/09
+- Instructor "Καζαντζή" should have her courses from 02 Sept to 04 Sept, on 11 Sept and from 21 Sept-23 Sept
 - Instructor "Μιχαηλίδης" should have 2 of his courses during the first week
+- Instructor "Βλαχονάσιου" should not have her courses on 15 Sept
 - Instructors "Βλαχονάσιου", "Φωτοπούλου", "Δανιήλ" should not have their courses start at 18:00
 - Instructors "Αυγέρης", "Κοκκαλά", "Κόκκινος", "Μπακάλης", "Παπαϊωάννου", "Σαπίδης", "Τσιαράπας", "Φαναραδέλλη", "Βοζίκης", "Βλαχονάσιου", "Δανιήλ", "Μιχαηλίδης" should have their courses grouped with 2 of them in the same day, if possible, but not more than 2 in the same day.
 - Instructor "Γαλάνης" should have his courses grouped in 2 periods. One of them should last up to 4 continuous days (e.g. Monday to Thursday or Tuesday to Friday), and the other up to 3 days.
 - Instructor "Λιαλιαμπής" should have his course in the same day with instructor "Βλαχονάσιου", the one next to the other and before September 15. For example, one of them at 12:00 and the other at 15:00
 - Instructor "Βοζίκης" should have his courses start at 12:00 or 15:00
-- Instructor "Επιτροπή" should be counted as another instuctor
+- Instructor "Επιτροπή" should be counted as another instructor
