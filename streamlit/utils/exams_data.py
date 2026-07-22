@@ -35,8 +35,13 @@ def _period_name(month: int) -> str:
 
 
 def _academic_year(year: int, month: int) -> str:
-    """Academic year string (e.g. "2025-2026"); the year rolls over in September."""
-    start = year if month >= 9 else year - 1
+    """Academic year string (e.g. "2025-2026"); the year rolls over in October.
+
+    September (month 9) still belongs to the *previous* academic year: the
+    "Επαναληπτική Σεπτεμβρίου" resit period is the final exam period of that
+    year, held just before the new academic year starts in October.
+    """
+    start = year if month >= 10 else year - 1
     return f"{start}-{start + 1}"
 
 
