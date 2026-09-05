@@ -16,10 +16,10 @@ warnings.filterwarnings(
 
 st.set_page_config(page_title="Περιγράμματα μαθημάτων", page_icon=":house:", initial_sidebar_state="expanded")
 
-# from auth import render_login_block  # noqa: E402
+from auth import render_login_block  # noqa: E402
 
 st.title("Civil Engineering — IHU")
-# render_login_block()
+render_login_block()
 
 # The Postgres database is reachable only from inside Railway, so its schema
 # and the historical data are installed here, on first start. Runs once per
