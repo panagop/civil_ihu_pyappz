@@ -13,9 +13,9 @@ st.set_page_config(
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-# from auth import require_ihu_login  # noqa: E402
+from auth import require_ihu_login  # noqa: E402
 
-# require_ihu_login()
+require_ihu_login()
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFESSORS_DIR = ROOT / "files" / "mitroa" / "professors_tables"

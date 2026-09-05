@@ -20,10 +20,10 @@ civil_ihu_pyappz/
 │   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
 │   ├── pages/
 │   │   ├── 1_📇_perigrammata.py      # Course syllabi — login gate ACTIVE
-│   │   ├── 2_📊_mitroa.py            # Course registries — gate currently commented out
+│   │   ├── 2_📊_mitroa.py            # Course registries — login gate ACTIVE
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
-│   │   └── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — reads files/mitroa/, no secrets
+│   │   └── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
 │   └── .streamlit/
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
 ├── scripts/
@@ -119,14 +119,13 @@ the script writes.
 
 ## Authentication
 
-> **Being re-enabled (2026-09-05).** `render_login_block()` in `home.py` and the
-> gate on page 1 are active again; pages 2 and 5 are still commented out. Page 5
-> is the full ΑΠΕΛΛΑ registry (~20k people) and is publicly readable until its
-> gate goes back on.
+> **Active since 2026-09-06.** Microsoft login works in all three environments.
+> Gated: pages 1, 2 and 5 (`require_ihu_login()`). Public: pages 3 and 4 —
+> timetables and exam schedules carry no personal data.
 >
 > `st.login()` raises `StreamlitAuthError` where `[auth]` is missing, so never
 > call it unguarded — `auth.is_configured()` exists for that, and
-> `render_login_block()` now shows a warning instead of a traceback.
+> `render_login_block()` shows a warning instead of a traceback.
 
 Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
 
@@ -136,9 +135,15 @@ Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC v
 By default, **any** `@ihu.gr` account is accepted. To restrict to a specific set of people, add a top-level `allowed_emails = [...]` list in `secrets.toml` (see commented example above). Behavior:
 
 - `allowed_emails` set → only those exact emails (case-insensitive) work, even if `@ihu.gr`.
-- `allowed_emails` missing/empty → any `@ihu.gr` account works (current default).
+- `allowed_emails` missing/empty → any `@ihu.gr` account works.
 
-Non-`@ihu.gr` emails are always rejected.
+Non-`@ihu.gr` emails are **always** rejected, listed or not — the suffix check
+runs before the allowlist. Granting an external collaborator access would need a
+change in `_email_allowed`.
+
+It is one list covering every gated page; there is no per-page group. Set it as
+a TOML list locally and on Streamlit Cloud, and as a comma-separated
+`allowed_emails` environment variable on Railway (`get_secret_list` splits it).
 
 ### Azure / Streamlit Cloud setup gotchas
 
