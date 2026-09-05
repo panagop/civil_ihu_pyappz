@@ -15,14 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # require_ihu_login()
 
-# Load Google Sheets ID from secrets
-try:
-    gsheet_mitroa_id = st.secrets['gsheet_mitroa_id']
-except Exception as e:
-    st.error(f"Error loading Google Sheets ID from secrets: {e}")
-    st.error("Make sure you have a .streamlit/secrets.toml file with "
-             "gsheet_mitroa_id configured")
-    st.stop()
+from settings import require_secret  # noqa: E402
+
+# Google Sheets ID: secrets.toml locally / on Streamlit Cloud, env var on Railway
+gsheet_mitroa_id = require_secret('gsheet_mitroa_id')
 
 st.markdown('## Μητρώα γνωστικών αντικειμένων')
 

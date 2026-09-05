@@ -56,14 +56,10 @@ def replace_none_with_empty_str(some_dict: dict[str, object]) -> dict[str, objec
     return {k: ('' if v is None else v) for k, v in some_dict.items()}
 
 
-# Load Google Sheets ID from secrets
-try:
-    gsheet_perigrammata_id = st.secrets['gsheet_perigrammata_id']
-except Exception as e:
-    st.error(f"Error loading Google Sheets ID from secrets: {e}")
-    st.error("Make sure you have a .streamlit/secrets.toml file with "
-             "gsheet_perigrammata_id configured")
-    st.stop()
+from settings import require_secret  # noqa: E402
+
+# Google Sheets ID: secrets.toml locally / on Streamlit Cloud, env var on Railway
+gsheet_perigrammata_id = require_secret('gsheet_perigrammata_id')
 
 st.markdown('## Περιγράμματα μαθημάτων')
 

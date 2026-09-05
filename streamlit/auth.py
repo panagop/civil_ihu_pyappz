@@ -13,17 +13,20 @@ from __future__ import annotations
 
 import streamlit as st
 
+from settings import get_secret_list
+
 ALLOWED_EMAIL_SUFFIX = "@ihu.gr"
 
 
 def _allowed_emails() -> set[str]:
-    """Lower-cased set of explicitly allowlisted emails from secrets.toml.
+    """Lower-cased set of explicitly allowlisted emails.
 
-    If the `allowed_emails` key is missing/empty, only the domain-suffix
-    check applies (any @ihu.gr account works).
+    Read from secrets.toml locally / on Streamlit Cloud, or from an
+    `allowed_emails` environment variable (comma-separated) on Railway.
+    If missing/empty, only the domain-suffix check applies (any @ihu.gr
+    account works).
     """
-    raw = st.secrets.get("allowed_emails", [])
-    return {e.strip().lower() for e in raw if e and e.strip()}
+    return {e.lower() for e in get_secret_list("allowed_emails")}
 
 
 def _email_allowed(email: str | None) -> bool:
