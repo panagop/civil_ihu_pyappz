@@ -105,8 +105,32 @@ LOCKED = "ΚΛΕΙΔΩΜΕΝΟ"
 
 ADD = "ΠΡΟΣΘΗΚΗ"
 REMOVE = "ΑΦΑΙΡΕΣΗ"
+MODIFY = "ΜΕΤΑΒΟΛΗ"
+# Superseded by MODIFY, which carries both values at once: changing the
+# characterisation and fixing the justification is one decision, and splitting
+# it in two let a coordinator accept half of it. Still accepted by the schema so
+# that any row written before the change keeps replaying.
 RECHARACTERIZE = "ΧΑΡΑΚΤΗΡΙΣΜΟΣ"
 REJUSTIFY = "ΑΙΤΙΟΛΟΓΗΣΗ"
+
+# Applied after SCHEMA_SQL. CREATE TABLE IF NOT EXISTS will not touch a table
+# that already exists, so anything added to an existing installation has to go
+# here — idempotently, because it runs on every start.
+MIGRATIONS_SQL = """
+ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_action_check;
+ALTER TABLE proposals ADD CONSTRAINT proposals_action_check CHECK (action IN
+    ('ΠΡΟΣΘΗΚΗ', 'ΑΦΑΙΡΕΣΗ', 'ΜΕΤΑΒΟΛΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ', 'ΑΙΤΙΟΛΟΓΗΣΗ'));
+
+ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_needs_characterization;
+ALTER TABLE proposals ADD CONSTRAINT proposals_needs_characterization CHECK (
+    action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΜΕΤΑΒΟΛΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ')
+    OR characterization IS NOT NULL);
+
+ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_needs_reasoning;
+ALTER TABLE proposals ADD CONSTRAINT proposals_needs_reasoning CHECK (
+    action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΜΕΤΑΒΟΛΗ', 'ΑΙΤΙΟΛΟΓΗΣΗ')
+    OR reasoning IS NOT NULL);
+"""
 
 
 @st.cache_resource
@@ -145,6 +169,7 @@ def bootstrap() -> str:
     try:
         with engine.begin() as conn:
             conn.execute(text(SCHEMA_SQL))
+            conn.execute(text(MIGRATIONS_SQL))
         from seed_external import seed_historical_years
 
         status = seed_historical_years(engine)
@@ -311,9 +336,9 @@ def working_electors(year: int) -> pd.DataFrame:
         elif key in rows:
             # A change to somebody who is no longer in the table is a no-op
             # rather than an error: the removal may have been accepted later.
-            if change.action == RECHARACTERIZE:
+            if change.action in (MODIFY, RECHARACTERIZE):
                 rows[key]["characterization"] = change.characterization
-            elif change.action == REJUSTIFY:
+            if change.action in (MODIFY, REJUSTIFY):
                 rows[key]["reasoning"] = change.reasoning
 
     if not rows:

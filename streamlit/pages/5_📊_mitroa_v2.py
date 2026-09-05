@@ -932,10 +932,14 @@ with tab_proposals:
             f"Μητρώο αναφοράς: `{registry_path.name}` · "
             f"στήλη κωλύματος: {', '.join(f'«{c}»' for c in blocking_now) or '—'}"
         )
+        baseline_path = db.registry_file_for_year(BASELINE_YEAR)
         proposals_ui.render(
             year=WORKING_YEAR,
             baseline_year=BASELINE_YEAR,
             registry=registry_now,
+            baseline_registry=(
+                load_professors(str(baseline_path)) if baseline_path else None
+            ),
             antikeimena=load_antikeimena(),
             blocking_cols=blocking_now,
             fold=fold_greek_series,

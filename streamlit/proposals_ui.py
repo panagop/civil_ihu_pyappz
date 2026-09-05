@@ -19,15 +19,30 @@ import db
 ID_COL = "Κωδικός Χρήστη"
 
 ACTION_LABELS = {
+    db.MODIFY: "Μεταβολή χαρακτηρισμού / αιτιολόγησης",
     db.REMOVE: "Αφαίρεση εκλέκτορα",
     db.RECHARACTERIZE: "Αλλαγή χαρακτηρισμού",
     db.REJUSTIFY: "Διόρθωση αιτιολόγησης",
 }
-PROPOSAL_MARKS = {db.ADD: "➕", db.REMOVE: "➖", db.RECHARACTERIZE: "🔄", db.REJUSTIFY: "✏️"}
+PROPOSAL_MARKS = {
+    db.ADD: "➕", db.REMOVE: "➖", db.MODIFY: "🔄",
+    db.RECHARACTERIZE: "🔄", db.REJUSTIFY: "✏️",
+}
 
 BLOCKED_MARK = "🔴"
+CHANGED_MARK = "🟡"
 PROPOSED_COL = "Εκκρεμεί"
 FLAG_COL = "Σήμανση"
+REGISTRY_CHANGE_COL = "Μεταβολές μητρώου"
+
+# What is compared between the baseline year's registry and the current one, as
+# (registry column, label). Κατηγορία Χρήστη is deliberately absent: the exports
+# relabelled it, which would flag almost everybody.
+TRACKED_FIELDS = [
+    ("Βαθμίδα", "Βαθμίδα"),
+    ("Γνωστικό Αντικείμενο", "Γνωστικό αντικείμενο"),
+    ("Φορέας", "Φορέας"),
+]
 
 
 def _person_label(registry_by_id: dict, elector_id: int) -> str:
@@ -46,13 +61,49 @@ def _blocked_ids(registry: pd.DataFrame, blocking_cols: list[str]) -> set[int]:
     return set(registry.loc[mask, ID_COL].astype("int64"))
 
 
+def registry_changes(
+    baseline: pd.DataFrame, current: pd.DataFrame, fold
+) -> dict[int, str]:
+    """Per elector, a description of what moved between the two registries.
+
+    Only electors present in both are compared; someone who left the registry
+    is caught by the κώλυμα/absence checks instead.
+
+    Values are compared through ``fold`` (fold_greek_series), not casefold:
+    the exports re-typed several subjects in title case, and "ΔΥΝΑΜΙΚΗ" vs
+    "Δυναμική" differs by an accent that casefold keeps. Those are not changes
+    anyone needs to look at.
+    """
+    if baseline is None or baseline.empty or current.empty:
+        return {}
+    old = baseline.copy()
+    old[ID_COL] = old[ID_COL].astype("int64")
+    old = old.set_index(ID_COL)
+    new = current.set_index(ID_COL)
+    shared = old.index.intersection(new.index)
+
+    changes: dict[int, list[str]] = {}
+    for column, label in TRACKED_FIELDS:
+        if column not in old.columns or column not in new.columns:
+            continue
+        before = old.loc[shared, column].fillna("").astype(str).str.strip()
+        after = new.loc[shared, column].fillna("").astype(str).str.strip()
+        differs = (fold(before) != fold(after)).to_numpy()
+        for elector in shared[differs]:
+            changes.setdefault(int(elector), []).append(
+                f"{label}: {before[elector]} → {after[elector]}"
+            )
+    return {elector: " · ".join(items) for elector, items in changes.items()}
+
+
 def _decorate(
     table: pd.DataFrame,
     registry_by_id: dict,
     blocked: set[int],
     pending: pd.DataFrame,
+    changes: dict[int, str],
 ) -> pd.DataFrame:
-    """The subject's table with names, a κώλυμα flag and pending-change marks."""
+    """The subject's table with names, flags, registry changes and pending marks."""
     marks: dict[int, list[str]] = {}
     for row in pending.itertuples(index=False):
         marks.setdefault(int(row.elector_id), []).append(
@@ -63,15 +114,18 @@ def _decorate(
     for row in table.itertuples(index=False):
         elector = int(row.elector_id)
         person = registry_by_id.get(elector, {})
+        change = changes.get(elector, "")
+        flag = BLOCKED_MARK if elector in blocked else (CHANGED_MARK if change else "")
         records.append(
             {
-                FLAG_COL: BLOCKED_MARK if elector in blocked else "",
+                FLAG_COL: flag,
                 "Χαρακτηρισμός": row.characterization,
                 ID_COL: elector,
                 "Επώνυμο": person.get("Επώνυμο", ""),
                 "Όνομα": person.get("Όνομα", ""),
                 "Βαθμίδα": person.get("Βαθμίδα", ""),
                 "Φορέας": person.get("Φορέας", ""),
+                REGISTRY_CHANGE_COL: change,
                 PROPOSED_COL: " · ".join(marks.get(elector, [])),
                 "Αιτιολόγηση συνάφειας": row.reasoning,
             }
@@ -103,36 +157,61 @@ def _propose_change(year: int, field_code: int, table: pd.DataFrame,
         _person_label(registry_by_id, int(row.elector_id)): row
         for row in table.itertuples(index=False)
     }
-    with st.form(f"change_{field_code}"):
-        label = st.selectbox("Εκλέκτορας", list(options))
-        action = st.radio(
-            "Ενέργεια", list(ACTION_LABELS), format_func=ACTION_LABELS.get,
-            horizontal=True,
+    # Deliberately OUTSIDE the form. A widget inside st.form does not rerun
+    # until submit, so the fields below would keep showing the values of
+    # whoever was selected before.
+    label = st.selectbox("Εκλέκτορας", list(options), key=f"chg_who_{field_code}")
+    current = options[label]
+    elector = int(current.elector_id)
+
+    action = st.radio(
+        "Ενέργεια", [db.MODIFY, db.REMOVE], horizontal=True,
+        format_func=ACTION_LABELS.get, key=f"chg_action_{field_code}",
+    )
+
+    # The elector is part of every key: Streamlit keeps the stored value of a
+    # widget whose key is unchanged, which would defeat the new defaults.
+    with st.form(f"change_{field_code}_{elector}_{action}"):
+        characterization, reasoning = None, None
+        if action == db.MODIFY:
+            st.caption(
+                "Αλλάξτε τον χαρακτηρισμό, την αιτιολόγηση ή και τα δύο. "
+                "Καταχωρείται ως μία πρόταση, ώστε να εγκριθεί ενιαία."
+            )
+            characterization = st.radio(
+                "Χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True,
+                index=db.CHARACTERIZATIONS.index(current.characterization),
+                key=f"chg_char_{field_code}_{elector}",
+            )
+            reasoning = st.text_area(
+                "Αιτιολόγηση συνάφειας", value=current.reasoning, height=140,
+                key=f"chg_reason_{field_code}_{elector}",
+            )
+        else:
+            st.warning(f"Πρόταση αφαίρεσης: **{label}**")
+
+        note = st.text_area(
+            "Αιτιολόγηση της μεταβολής *", placeholder="Γιατί;",
+            key=f"chg_note_{field_code}_{elector}_{action}",
         )
-        current = options[label]
-        characterization = st.radio(
-            "Νέος χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True,
-            index=db.CHARACTERIZATIONS.index(current.characterization),
-            help="Χρησιμοποιείται μόνο στην αλλαγή χαρακτηρισμού.",
-        )
-        reasoning = st.text_area(
-            "Νέα αιτιολόγηση συνάφειας", value=current.reasoning,
-            help="Χρησιμοποιείται μόνο στη διόρθωση αιτιολόγησης.",
-        )
-        note = st.text_area("Αιτιολόγηση της μεταβολής *", placeholder="Γιατί;")
 
         if st.form_submit_button("Καταχώρηση πρότασης"):
+            unchanged = action == db.MODIFY and (
+                characterization == current.characterization
+                and (reasoning or "").strip() == (current.reasoning or "").strip()
+            )
+            if unchanged:
+                st.error("Δεν αλλάξατε τίποτα.")
+                return
             message = db.add_proposal(
                 year=year,
                 field_code=field_code,
-                elector_id=int(current.elector_id),
+                elector_id=elector,
                 action=action,
                 note=note,
                 author=user_email,
-                characterization=(
-                    characterization if action == db.RECHARACTERIZE else None
-                ),
-                reasoning=reasoning if action == db.REJUSTIFY else None,
+                characterization=characterization,
+                reasoning=(reasoning or "").strip() or None,
             )
             if message.startswith("Η πρόταση καταχωρήθηκε"):
                 st.success(message)
@@ -266,8 +345,8 @@ def _coordinator_block(year: int, registry_by_id: dict, user_email: str) -> None
 
 
 def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
-           antikeimena: pd.DataFrame, blocking_cols: list[str],
-           fold, user_email: str) -> None:
+           baseline_registry: pd.DataFrame | None, antikeimena: pd.DataFrame,
+           blocking_cols: list[str], fold, user_email: str) -> None:
     """Draw the whole tab. `fold` is page 5's fold_greek_series."""
     if not db.is_available():
         st.warning(
@@ -299,6 +378,7 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     registry[ID_COL] = registry[ID_COL].astype("int64")
     registry_by_id = registry.set_index(ID_COL).to_dict("index")
     blocked = _blocked_ids(registry, blocking_cols)
+    changes = registry_changes(baseline_registry, registry, fold)
 
     table = db.working_electors(year)
     labels = {
@@ -320,16 +400,26 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         int(subject["elector_id"].astype("int64").isin(blocked).sum())
         if not subject.empty else 0
     )
-    col_d.metric("Με κώλυμα", blocked_here, delta=None)
+    col_d.metric("Με κώλυμα", blocked_here)
 
     if blocked_here:
         st.warning(
-            f"{blocked_here} εκλέκτορες έχουν κώλυμα αποκλεισμού από τα μητρώα "
-            "και πρέπει να αφαιρεθούν ή να τεκμηριωθεί η παραμονή τους."
+            f"{BLOCKED_MARK} {blocked_here} εκλέκτορες έχουν κώλυμα αποκλεισμού "
+            "από τα μητρώα και πρέπει να αφαιρεθούν ή να τεκμηριωθεί η παραμονή τους."
+        )
+    changed_here = (
+        int(subject["elector_id"].astype("int64").isin(changes).sum())
+        if not subject.empty else 0
+    )
+    if changed_here:
+        st.info(
+            f"{CHANGED_MARK} {changed_here} εκλέκτορες άλλαξαν βαθμίδα, γνωστικό "
+            f"αντικείμενο ή φορέα από το {baseline_year}. Δείτε τη στήλη "
+            f"«{REGISTRY_CHANGE_COL}» — συνήθως δεν απαιτείται ενέργεια."
         )
 
     st.dataframe(
-        _decorate(subject, registry_by_id, blocked, pending),
+        _decorate(subject, registry_by_id, blocked, pending, changes),
         use_container_width=True, hide_index=True,
     )
 

@@ -261,7 +261,10 @@ and the page-5 tab and the Word report need no notion of drafts.
   `db.open_year(2026, baseline_year=2025, …)` copies nothing; it just records
   the baseline.
 - `proposals` — one row per proposed change: `ΠΡΟΣΘΗΚΗ` / `ΑΦΑΙΡΕΣΗ` /
-  `ΧΑΡΑΚΤΗΡΙΣΜΟΣ` / `ΑΙΤΙΟΛΟΓΗΣΗ`, with a mandatory `note`, the `author` (from
+  `ΜΕΤΑΒΟΛΗ` (carries the new characterisation *and* the new justification, so
+  changing both stays one decision a coordinator cannot half-accept; the older
+  split `ΧΑΡΑΚΤΗΡΙΣΜΟΣ` / `ΑΙΤΙΟΛΟΓΗΣΗ` still replay), with a mandatory `note`,
+  the `author` (from
   `st.user.email`, so it is asserted by Microsoft rather than typed) and
   `ΕΚΚΡΕΜΕΙ` / `ΕΓΚΡΙΘΗΚΕ` / `ΑΠΟΡΡΙΦΘΗΚΕ` / `ΑΠΟΣΥΡΘΗΚΕ`.
 
@@ -282,6 +285,19 @@ pending proposals), then sub-tabs for Μεταβολή / Προσθήκη / Οι
 and a coordinator-only section to decide proposals and lock the year. Actions
 sit in a form under the table rather than as buttons on each row: ~26 electors
 × 3 buttons would rebuild ~80 widgets per rerun for a worse layout.
+
+🟡 marks anyone whose βαθμίδα, γνωστικό αντικείμενο or φορέας moved since the
+baseline year, with the before → after in its own column
+(`registry_changes`). It compares through `fold_greek_series`, **not**
+`casefold`: the exports re-typed subjects in title case, and `ΔΥΝΑΜΙΚΗ` vs
+`Δυναμική` differs by an accent casefold keeps — that alone was two false
+findings out of 42.
+
+**The elector selectbox is outside `st.form` on purpose.** A widget inside a
+form does not rerun until submit, so the fields below kept showing the previous
+elector's justification. Widget keys also include the elector id, because
+Streamlit keeps the stored value of a key that has not changed and would
+override the new defaults.
 
 Roles are two, and there is deliberately **no users table**: a coordinator is an
 email listed in the `coordinator_emails` setting (same mechanism as
