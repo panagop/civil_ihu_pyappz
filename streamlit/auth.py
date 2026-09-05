@@ -29,6 +29,21 @@ def _allowed_emails() -> set[str]:
     return {e.lower() for e in get_secret_list("allowed_emails")}
 
 
+def is_configured() -> bool:
+    """True iff an OIDC provider is set up in this environment.
+
+    ``st.login()`` raises ``StreamlitAuthError`` when ``[auth]`` is missing, and
+    ``[auth]`` is nested TOML with no environment-variable equivalent — so a
+    host that only offers env vars has none unless
+    ``scripts/write_secrets_toml.py`` ran first. Check before offering a login
+    button, or the button is a traceback waiting to be clicked.
+    """
+    try:
+        return "auth" in st.secrets
+    except Exception:
+        return False  # no secrets file at all on this host
+
+
 def _email_allowed(email: str | None) -> bool:
     if not email:
         return False
@@ -82,6 +97,12 @@ def render_login_block() -> None:
     user = st.user
 
     if not getattr(user, "is_logged_in", False):
+        if not is_configured():
+            st.warning(
+                "Η σύνδεση δεν είναι ρυθμισμένη σε αυτό το περιβάλλον "
+                "(λείπει το `[auth]` από τα secrets)."
+            )
+            return
         st.info(
             "Ορισμένες σελίδες (Περιγράμματα, Μητρώα) απαιτούν σύνδεση "
             f"με λογαριασμό `{ALLOWED_EMAIL_SUFFIX}`."

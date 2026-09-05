@@ -19,13 +19,15 @@ civil_ihu_pyappz/
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
 │   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
 │   ├── pages/
-│   │   ├── 1_📇_perigrammata.py      # Course syllabi — gate currently commented out
+│   │   ├── 1_📇_perigrammata.py      # Course syllabi — login gate ACTIVE
 │   │   ├── 2_📊_mitroa.py            # Course registries — gate currently commented out
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
 │   │   └── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — reads files/mitroa/, no secrets
 │   └── .streamlit/
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
+├── scripts/
+│   └── write_secrets_toml.py         # Writes [auth] to secrets.toml at container start
 ├── civil_ihu_pyappz/                 # Python package (legacy; perigrammata.py not used by the app)
 ├── files/
 │   ├── exams/                        # Exam Excel files (.xlsm); active: exams-2026-06.xlsm
@@ -103,18 +105,28 @@ back to `os.environ`:
 - `get_secret_list(key)` — list; a comma-separated string (env) is split.
 - `require_secret(key)` — value, or `st.error` + `st.stop()` with a clear message.
 
-Use these in new pages. Nested TOML (like `[auth]`) has no env-var equivalent —
-on a host without a secrets file, OIDC needs a real `secrets.toml` written at
-startup.
+Use these in new pages. Nested TOML (like `[auth]`) has **no env-var
+equivalent**, and `st.login()` reads `[auth]` out of the TOML itself rather than
+through `settings.py` — so on a host without a secrets file, OIDC needs a real
+file. [scripts/write_secrets_toml.py](scripts/write_secrets_toml.py) writes one
+from flat `AUTH_*` variables and is chained into the Railway start command. It
+is a no-op without those variables and never overwrites an existing file.
+
+Streamlit searches three locations, last wins: `~/.streamlit/secrets.toml`,
+`<cwd>/.streamlit/secrets.toml`, `<entry script dir>/.streamlit/secrets.toml`.
+The third is why the file lives in `streamlit/.streamlit/` here, and is where
+the script writes.
 
 ## Authentication
 
-> **Currently DISABLED.** The `require_ihu_login()` calls in pages 1, 2 and 5 are
-> commented out (2026-09-05), so every page is open, and `render_login_block()`
-> is commented out in `home.py` too — there is no login button at all. Re-enable
-> by uncommenting the import + call in `home.py` and at the top of each protected
-> page. Note this makes page 5 — the full ΑΠΕΛΛΑ registry, ~20k people —
-> publicly readable wherever the app is deployed.
+> **Being re-enabled (2026-09-05).** `render_login_block()` in `home.py` and the
+> gate on page 1 are active again; pages 2 and 5 are still commented out. Page 5
+> is the full ΑΠΕΛΛΑ registry (~20k people) and is publicly readable until its
+> gate goes back on.
+>
+> `st.login()` raises `StreamlitAuthError` where `[auth]` is missing, so never
+> call it unguarded — `auth.is_configured()` exists for that, and
+> `render_login_block()` now shows a warning instead of a traceback.
 
 Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
 
@@ -156,7 +168,12 @@ Railway (workspace "Georgios Panagopoulos's Projects", Hobby plan):
 - Builder Railpack; start command
   `streamlit run streamlit/home.py --server.port $PORT --server.address 0.0.0.0`
 - Variables set: `gsheet_perigrammata_id`, `gsheet_mitroa_id`,
-  `gsheet_exams_schedule_id` (flat env vars — resolved via `settings.py`)
+  `gsheet_exams_schedule_id` (flat env vars — resolved via `settings.py`),
+  `DATABASE_URL` (reference to the Postgres service), and for OIDC
+  `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, `AUTH_COOKIE_SECRET`,
+  `AUTH_SERVER_METADATA_URL` (+ optional `AUTH_REDIRECT_URI`, otherwise derived
+  from `RAILWAY_PUBLIC_DOMAIN`)
+- Start command runs `scripts/write_secrets_toml.py` first, then Streamlit
 - The container filesystem is **ephemeral**: generated files do not survive a
   restart. Anything to keep must be downloaded and committed to the repo.
 
