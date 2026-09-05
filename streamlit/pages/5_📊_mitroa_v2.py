@@ -1,6 +1,7 @@
 import io
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 import pandas as pd
@@ -32,6 +33,7 @@ CHARAKTIRISMOS_COL = "Χαρακτη-ρισμός"
 CHARAKTIRISMOS_ALIASES = {"ΙΔΙΟ": "ΙΔΙΟΥ", "ΣΥΝΑΦΕΣ": "ΣΥΝΑΦΟΥΣ"}
 
 ID_COL = "Κωδικός Χρήστη"
+SUBJECT_COL = "Γνωστικό Αντικείμενο"
 # Fields compared between the year tables and the registry, as
 # (column in the external tables, column in the registry, label)
 COMPARED_FIELDS = [
@@ -41,6 +43,16 @@ COMPARED_FIELDS = [
 ]
 # Κατηγορία Χρήστη is deliberately NOT compared: the exports relabelled it
 # ("Ημεδαπής" -> "Καθηγητής Ημεδαπής"), which would swamp the real findings.
+# Only exclusion from the μητρώα blocks an elector. Exclusion from
+# εκλεκτορικά/επιτροπές is reported for information but does not disqualify.
+# ("Σε αναστολή" is the equivalent column in the 2024/2025 exports.)
+BLOCKING_FLAG_KEYWORDS = ["αποκλεισμου απο μητρωα", "σε αναστολη"]
+# How multiple keywords combine in the keyword search tab
+MATCH_ANY = "Οποιαδήποτε λέξη (OR)"
+MATCH_ALL = "Όλες οι λέξεις (AND)"
+# Marks electors absent from the registry being compared against
+NEW_COL = "Νέος"
+
 STATUS_MISSING = "🔴 Εκτός μητρώου"
 STATUS_KOLYMA = "🟠 Κώλυμα"
 STATUS_CHANGED = "🟡 Μεταβολή"
@@ -140,18 +152,66 @@ def normalize(series: pd.Series) -> pd.Series:
     )
 
 
-def detect_flag_columns(df: pd.DataFrame) -> list[str]:
-    """Registry columns that are ΝΑΙ/ΟΧΙ flags (κωλύματα, αναστολές, άδειες).
+def fold_greek(text: str) -> str:
+    """Accent-, case- and final-sigma-insensitive form of a Greek string.
 
-    Detected by their values rather than by name, because the column names
-    change between yearly exports — a new flag column is picked up on its own.
+    Plain ``casefold()`` is not enough: "σκυροδέμ" would not match
+    "Σκυρόδεμα" (the accent sits on a different vowel) and "ς" does not
+    casefold to "σ".
     """
-    flags = []
+    decomposed = unicodedata.normalize("NFD", str(text))
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return stripped.casefold().replace("ς", "σ")
+
+
+# Built from code points rather than written as "̀-ͯ": the parquet
+# columns are Arrow-backed and pandas runs their regexes through RE2, which
+# rejects \u escapes.
+COMBINING_MARKS_RE = f"[{chr(0x0300)}-{chr(0x036F)}]"
+
+
+def fold_greek_series(series: pd.Series) -> pd.Series:
+    """Vectorised :func:`fold_greek` for a whole column."""
+    return (
+        series.fillna("")
+        .astype(str)
+        .str.normalize("NFD")
+        .str.replace(COMBINING_MARKS_RE, "", regex=True)
+        .str.casefold()
+        .str.replace("ς", "σ", regex=False)
+    )
+
+
+def split_flag_columns(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    """Registry ΝΑΙ/ΟΧΙ flag columns, split into (blocking, informational).
+
+    Flags are found by their values rather than their names, because the column
+    names change between yearly exports. Whether a flag disqualifies an elector
+    is then decided by name against BLOCKING_FLAG_KEYWORDS.
+    """
+    blocking, informational = [], []
     for col in df.columns:
         values = set(df[col].dropna().astype(str).str.strip().unique())
-        if values and values <= {"ΝΑΙ", "ΟΧΙ"}:
-            flags.append(col)
-    return flags
+        if not values or not values <= {"ΝΑΙ", "ΟΧΙ"}:
+            continue
+        folded = fold_greek(col)
+        if any(k in folded for k in BLOCKING_FLAG_KEYWORDS):
+            blocking.append(col)
+        else:
+            informational.append(col)
+    return blocking, informational
+
+
+@st.cache_data
+def registry_ids(registry_path_str: str) -> set[int]:
+    """The Κωδικοί Χρήστη present in a registry export."""
+    return set(load_professors(registry_path_str)[ID_COL])
+
+
+@st.cache_data
+def folded_subjects(registry_path_str: str) -> pd.Series:
+    """The Γνωστικό Αντικείμενο column of a registry, folded for searching."""
+    return fold_greek_series(load_professors(registry_path_str)[SUBJECT_COL])
 
 
 @st.cache_data
@@ -163,7 +223,7 @@ def build_check(external_path_str: str, registry_path_str: str) -> pd.DataFrame:
     """
     workbook = load_external_workbook(external_path_str)
     registry = load_professors(registry_path_str)
-    flag_cols = detect_flag_columns(registry)
+    blocking_cols, info_cols = split_flag_columns(registry)
 
     frames = []
     for entry in workbook.values():
@@ -184,11 +244,17 @@ def build_check(external_path_str: str, registry_path_str: str) -> pd.DataFrame:
         """Name the joined registry column took after the rsuffix collision."""
         return f"{name}_reg" if f"{name}_reg" in merged.columns else name
 
-    # Active κωλύματα, listed by column name so the user sees which one applies
-    kolymata = pd.Series([""] * len(merged), index=merged.index)
-    for col in flag_cols:
-        hit = merged[reg_col(col)].astype(str).str.strip().eq("ΝΑΙ") & present
-        kolymata = kolymata.where(~hit, kolymata.str.cat(pd.Series([col] * len(merged), index=merged.index), sep=" | ").str.strip(" |"))
+    def collect_flags(columns: list[str]) -> pd.Series:
+        """Join the names of the flags that are ΝΑΙ for each row."""
+        out = pd.Series([""] * len(merged), index=merged.index)
+        for col in columns:
+            hit = merged[reg_col(col)].astype(str).str.strip().eq("ΝΑΙ") & present
+            labels = pd.Series([col] * len(merged), index=merged.index)
+            out = out.where(~hit, out.str.cat(labels, sep=" | ").str.strip(" |"))
+        return out
+
+    kolymata = collect_flags(blocking_cols)      # disqualifying
+    simanseis = collect_flags(info_cols)         # reported only
 
     # Changed fields, with the old/new pair kept side by side
     changes = pd.Series([""] * len(merged), index=merged.index)
@@ -220,6 +286,7 @@ def build_check(external_path_str: str, registry_path_str: str) -> pd.DataFrame:
             "Επώνυμο": merged["Επώνυμο"],
             "Όνομα": merged["Όνομα"],
             "Κωλύματα": kolymata,
+            "Λοιπές σημάνσεις": simanseis,
             "Μεταβολές": changes,
             **out_cols,
         }
@@ -263,12 +330,13 @@ def apply_text_search(df: pd.DataFrame, query: str) -> pd.DataFrame:
 
 st.markdown("## Μητρώα γνωστικών αντικειμένων (v2)")
 
-tab_eklektores, tab_antikeimena, tab_external, tab_check = st.tabs(
+tab_eklektores, tab_antikeimena, tab_external, tab_check, tab_keywords = st.tabs(
     [
         "Σύνολο εκλεκτόρων",
         "Γνωστικά αντικείμενα",
         "Εξωτερικοί εκλέκτορες ανά αντικείμενο",
         "Έλεγχος εγκυρότητας",
+        "Αναζήτηση με λέξεις-κλειδιά",
     ]
 )
 
@@ -455,11 +523,22 @@ with tab_check:
 
         check = build_check(str(external_path), str(registry_path))
         persons = check.drop_duplicates(ID_COL)
+        blocking_cols, info_cols = split_flag_columns(load_professors(str(registry_path)))
 
         st.caption(
             f"Έλεγχος των εκλεκτόρων του `{external_path.name}` έναντι του "
             f"`{registry_path.name}` — {len(check)} εγγραφές, "
             f"{len(persons)} μοναδικά πρόσωπα."
+        )
+        st.caption(
+            "Ως κώλυμα λογίζεται μόνο: "
+            + (", ".join(f"«{c}»" for c in blocking_cols) or "—")
+            + (
+                ". Καταγράφονται χωρίς αποκλεισμό: "
+                + ", ".join(f"«{c}»" for c in info_cols)
+                if info_cols
+                else ""
+            )
         )
 
         cols = st.columns(4)
@@ -520,3 +599,138 @@ with tab_check:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="check_download",
         )
+
+
+with tab_keywords:
+    registry_files = list_professor_files()
+    labels = list(registry_files)
+
+    col_reg, col_prev = st.columns(2)
+    kw_registry_label = col_reg.selectbox("Μητρώο", labels, key="kw_registry_year")
+    kw_registry_path = registry_files[kw_registry_label]
+    kw_df = load_professors(str(kw_registry_path))
+
+    # Default comparison is the next oldest registry, i.e. "the previous year"
+    others = [lbl for lbl in labels if lbl != kw_registry_label]
+    previous_label = (
+        col_prev.selectbox(
+            "Σύγκριση με",
+            others,
+            index=min(labels.index(kw_registry_label), len(others) - 1),
+            key="kw_previous_year",
+            help="Ως «νέοι» θεωρούνται όσοι δεν υπάρχουν στο μητρώο αυτό.",
+        )
+        if others
+        else None
+    )
+    previous_ids = (
+        registry_ids(str(registry_files[previous_label])) if previous_label else set()
+    )
+
+    raw_keywords = st.text_area(
+        "Λέξεις-κλειδιά",
+        placeholder="σκυροδ, γεωτεχν, οπλισμένο σκυρόδεμα",
+        help=(
+            "Μία λέξη ανά γραμμή ή χωρισμένες με κόμμα. Η αναζήτηση γίνεται "
+            "στο Γνωστικό Αντικείμενο, αγνοεί πεζά/κεφαλαία και τόνους, και "
+            "βρίσκει και τμήματα λέξεων."
+        ),
+        key="kw_input",
+    )
+    keywords = [k.strip() for k in re.split(r"[,\r\n]+", raw_keywords) if k.strip()]
+
+    match_mode = st.radio(
+        "Λογική συνδυασμού",
+        [MATCH_ANY, MATCH_ALL],
+        horizontal=True,
+        key="kw_match_mode",
+        help=(
+            f"«{MATCH_ANY}»: αρκεί μία λέξη να βρεθεί. "
+            f"«{MATCH_ALL}»: πρέπει να υπάρχουν όλες στο ίδιο αντικείμενο."
+        ),
+    )
+
+    if not keywords:
+        st.info("Δώστε τουλάχιστον μία λέξη-κλειδί για να γίνει αναζήτηση.")
+    else:
+        subjects = folded_subjects(str(kw_registry_path))
+        # One column per keyword, so we can report which ones matched
+        hits = {kw: subjects.str.contains(re.escape(fold_greek(kw))) for kw in keywords}
+        matched = pd.DataFrame(hits, index=kw_df.index)
+        selected = (
+            matched.all(axis=1) if match_mode == MATCH_ALL else matched.any(axis=1)
+        )
+
+        results = kw_df[selected].copy()
+        results.insert(
+            0,
+            "Λέξεις που ταιριάζουν",
+            matched[selected].apply(
+                lambda row: " | ".join(k for k in keywords if row[k]), axis=1
+            ),
+        )
+
+        if previous_label:
+            is_new = ~results[ID_COL].isin(previous_ids)
+            results.insert(1, NEW_COL, is_new.map({True: "ΝΑΙ", False: ""}))
+            show_only_new = st.toggle(
+                f"Μόνο νέοι σε σχέση με το μητρώο {previous_label}",
+                value=False,
+                key="kw_only_new",
+                help=(
+                    "Εκλέκτορες που υπάρχουν στο επιλεγμένο μητρώο αλλά όχι "
+                    "στο μητρώο σύγκρισης."
+                ),
+            )
+            if show_only_new:
+                results = results[is_new]
+
+        blocking_cols, _ = split_flag_columns(kw_df)
+        hide_blocked = st.toggle(
+            "Απόκρυψη όσων έχουν κώλυμα αποκλεισμού από μητρώα",
+            value=False,
+            key="kw_hide_blocked",
+        )
+        if hide_blocked and blocking_cols:
+            blocked = pd.Series(False, index=results.index)
+            for col in blocking_cols:
+                blocked |= results[col].astype(str).str.strip().eq("ΝΑΙ")
+            results = results[~blocked]
+
+        col_found, col_new, col_kw = st.columns(3)
+        col_found.metric("Εκλέκτορες που βρέθηκαν", f"{len(results):,}")
+        if previous_label:
+            col_new.metric(
+                f"Νέοι από το {previous_label}",
+                f"{int(results[NEW_COL].eq('ΝΑΙ').sum()):,}",
+            )
+        col_kw.metric("Λέξεις-κλειδιά", len(keywords))
+
+        per_keyword = pd.DataFrame(
+            {
+                "Λέξη-κλειδί": keywords,
+                "Εκλέκτορες": [int(matched[k].sum()) for k in keywords],
+            }
+        )
+        if (per_keyword["Εκλέκτορες"] == 0).any():
+            missed = per_keyword[per_keyword["Εκλέκτορες"] == 0]["Λέξη-κλειδί"]
+            warning = "Καμία εγγραφή για: " + ", ".join(missed)
+            if match_mode == MATCH_ALL:
+                # With AND a single unmatched keyword empties the whole result
+                warning += " — με λογική AND το αποτέλεσμα είναι αναγκαστικά κενό."
+            st.warning(warning)
+
+        if results.empty:
+            st.info("Δεν βρέθηκαν εκλέκτορες για τις λέξεις αυτές.")
+        else:
+            st.dataframe(results, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Λήψη Excel",
+                data=to_excel_bytes(results),
+                file_name="anazitisi_lexeon.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="kw_download",
+            )
+
+        with st.expander("Πλήθος ανά λέξη-κλειδί"):
+            st.dataframe(per_keyword, use_container_width=True, hide_index=True)
