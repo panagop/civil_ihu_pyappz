@@ -20,6 +20,11 @@ from external_report import build_report  # noqa: E402
 
 require_ihu_login()
 
+# Also called from home.py, but Streamlit runs only the page you open: a
+# visitor landing straight here would otherwise find the historical years
+# unloaded. Cached, so it costs two cheap queries once the data is in.
+db.bootstrap()
+
 ROOT = Path(__file__).resolve().parents[2]
 PROFESSORS_DIR = ROOT / "files" / "mitroa" / "professors_tables"
 ANTIKEIMENA_CSV = ROOT / "files" / "mitroa" / "antikeimena.csv"

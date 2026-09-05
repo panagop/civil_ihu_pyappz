@@ -205,10 +205,24 @@ Consequences to keep in mind:
   crash** — the file-backed tabs of page 5 keep working in all three
   environments.
 - Because nothing outside Railway can seed it, the schema and the historical
-  data are installed **by the app itself on first start**:
-  `home.py` → `db.bootstrap()` (a `@st.cache_resource`, so once per process).
-  Both steps are idempotent. Its status line is printed to stdout as
-  `[db.bootstrap] ...` — the deployment logs are the only way to check it.
+  data are installed **by the app itself**, in two places on purpose:
+  - **Schema and migrations** run inside `db.get_engine()`. **Not** in
+    `bootstrap()`: Streamlit executes only the page you actually open, so a
+    visitor landing straight on page 5 never runs `home.py`. A migration that
+    depends on the landing page is a migration that silently does not happen —
+    this cost a `CheckViolation` in production on 2026-09-05.
+  - **Seeding** the historical years stays in `db.bootstrap()`, called from
+    both `home.py` and page 5. Slow only the first time; afterwards it is one
+    cheap query per year file.
+
+  Both are `@st.cache_resource`, so each runs once per process, and both are
+  idempotent. `[db.bootstrap] …` on stdout reports the seed status and the list
+  of tables — with no SSH and no public proxy, the deployment log is the only
+  way to confirm a schema change landed.
+- `SCHEMA_SQL` uses `CREATE TABLE IF NOT EXISTS`, which will **not** alter a
+  table that already exists. Anything changing an existing table goes in
+  `MIGRATIONS_SQL`, written to be safe on every start (`DROP CONSTRAINT IF
+  EXISTS` then `ADD CONSTRAINT`).
 
 ### `external_electors`
 

@@ -149,7 +149,20 @@ def get_engine() -> Engine | None:
         url = url.replace("postgresql://", "postgresql+psycopg://", 1)
     elif url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+psycopg://", 1)
-    return create_engine(url, pool_pre_ping=True)
+    engine = create_engine(url, pool_pre_ping=True)
+
+    # The schema is installed here rather than in bootstrap() because Streamlit
+    # runs only the page you actually open: land straight on page 5 and home.py
+    # never executes. A migration that depends on the landing page is a
+    # migration that silently does not happen. This function is cached, so the
+    # DDL runs once per process, and it is cheap and idempotent.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(SCHEMA_SQL))
+            conn.execute(text(MIGRATIONS_SQL))
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        print(f"[db.get_engine] Αποτυχία εφαρμογής σχήματος: {exc}", flush=True)
+    return engine
 
 
 def is_available() -> bool:
@@ -158,18 +171,17 @@ def is_available() -> bool:
 
 @st.cache_resource
 def bootstrap() -> str:
-    """Create the schema and load the historical years. Runs once per process.
+    """Load the historical years. Runs once per process, from home.py.
 
-    Returns a short human-readable status line. Never raises: a database
-    problem must not take down the file-backed pages.
+    The schema itself is installed by :func:`get_engine`; only the data seeding
+    lives here, because it is slow and needed by nothing until a page asks for a
+    stored year. Never raises: a database problem must not take down the
+    file-backed pages.
     """
     engine = get_engine()
     if engine is None:
         return "Χωρίς βάση δεδομένων (δεν έχει οριστεί DATABASE_URL)."
     try:
-        with engine.begin() as conn:
-            conn.execute(text(SCHEMA_SQL))
-            conn.execute(text(MIGRATIONS_SQL))
         from seed_external import seed_historical_years
 
         status = seed_historical_years(engine)
@@ -448,28 +460,34 @@ def add_proposal(
     if not note or not note.strip():
         return "Η αιτιολόγηση της μεταβολής είναι υποχρεωτική."
 
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO proposals
-                    (year, field_code, elector_id, action, characterization,
-                     reasoning, note, author)
-                VALUES (:year, :field_code, :elector_id, :action, :characterization,
-                        :reasoning, :note, :author)
-                """
-            ),
-            {
-                "year": year,
-                "field_code": field_code,
-                "elector_id": elector_id,
-                "action": action,
-                "characterization": characterization,
-                "reasoning": reasoning,
-                "note": note.strip(),
-                "author": author,
-            },
-        )
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO proposals
+                        (year, field_code, elector_id, action, characterization,
+                         reasoning, note, author)
+                    VALUES (:year, :field_code, :elector_id, :action, :characterization,
+                            :reasoning, :note, :author)
+                    """
+                ),
+                {
+                    "year": year,
+                    "field_code": field_code,
+                    "elector_id": elector_id,
+                    "action": action,
+                    "characterization": characterization,
+                    "reasoning": reasoning,
+                    "note": note.strip(),
+                    "author": author,
+                },
+            )
+    except Exception as exc:  # noqa: BLE001 - a rejected write is not a crash
+        # A constraint violation belongs in the form, not in a Streamlit
+        # traceback: the user can do something about "λείπει η αιτιολόγηση".
+        print(f"[db.add_proposal] {exc}", flush=True)
+        return f"Η καταχώρηση απορρίφθηκε από τη βάση: {type(exc).__name__}"
     return "Η πρόταση καταχωρήθηκε."
 
 
