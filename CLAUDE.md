@@ -248,6 +248,39 @@ years; do not build new features that require one.
 renders either source with one code path. Electors missing from that year's
 export are kept with blank columns and counted in a warning, never dropped.
 
+### Preparing a new year (proposals workflow)
+
+A year under preparation is **never stored as rows** while it is open. Its table
+is computed on read as *baseline year + accepted proposals*
+(`db.working_electors`); only `db.finalize_year` writes it into
+`external_electors`. So `external_electors` always means "officially approved",
+and the page-5 tab and the Word report need no notion of drafts.
+
+- `year_status(year, status, baseline_year, …)` — `ΑΝΟΙΧΤΟ` → `ΚΛΕΙΔΩΜΕΝΟ`.
+  `db.open_year(2026, baseline_year=2025, …)` copies nothing; it just records
+  the baseline.
+- `proposals` — one row per proposed change: `ΠΡΟΣΘΗΚΗ` / `ΑΦΑΙΡΕΣΗ` /
+  `ΧΑΡΑΚΤΗΡΙΣΜΟΣ` / `ΑΙΤΙΟΛΟΓΗΣΗ`, with a mandatory `note`, the `author` (from
+  `st.user.email`, so it is asserted by Microsoft rather than typed) and
+  `ΕΚΚΡΕΜΕΙ` / `ΕΓΚΡΙΘΗΚΕ` / `ΑΠΟΡΡΙΦΘΗΚΕ` / `ΑΠΟΣΥΡΘΗΚΕ`.
+
+**Why proposals rather than editing the table directly:** several members work
+on the same 52 subjects and Streamlit locks nothing. Direct edits would mean
+last-write-wins, silently. Two proposals on the same elector simply coexist and
+the coordinator resolves them.
+
+Replay rules (`working_electors`): proposals are applied in decision order, so a
+later accepted one wins; `ΧΑΡΑΚΤΗΡΙΣΜΟΣ`/`ΑΙΤΙΟΛΟΓΗΣΗ` aimed at an elector who
+has since been removed are **no-ops, not errors**. `finalize_year` refuses while
+any proposal is still pending.
+
+Roles are two, and there is deliberately **no users table**: a coordinator is an
+email listed in the `coordinator_emails` setting (same mechanism as
+`allowed_emails`), everyone else who passes the login gate is a member. Members
+may propose on any subject; only a coordinator decides proposals and locks a
+year. A table would need an admin screen to manage and still need some way to
+appoint the first admin.
+
 ### Consolidated report
 
 [streamlit/external_report.py](streamlit/external_report.py) builds one Word
