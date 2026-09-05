@@ -237,6 +237,18 @@ Seeding lives in [streamlit/seed_external.py](streamlit/seed_external.py),
 which parses `external_<year>.xlsx` and skips any year that already has rows.
 2025 loads as 1.476 rows / 52 αντικείμενα / 500 distinct electors.
 
+`load_external_from_db` (page 5) rebuilds a stored year in exactly the shape
+`load_external_workbook` returns — same keys, same column order — so the tab
+renders either source with one code path. Electors missing from that year's
+export are kept with blank columns and counted in a warning, never dropped.
+
+**The database view is not byte-identical to the workbook, by design.** Of
+13.284 compared cells for 2025, 475 differ: 40 are only capitalisation (the
+workbook is hand-typed in caps), 334 are the known Κατηγορία Χρήστη relabelling
+(`Ημεδαπής` → `Καθηγητής Ημεδαπής` — the workbook predates the export it is
+joined to), and ~100 are real drift in Βαθμίδα, ΦΕΚ and Σχολή. The database view
+shows the **official registry values**; the file view shows what was typed.
+
 ## Active data files
 
 Update these paths inside the page files when switching academic year:
@@ -252,8 +264,9 @@ yearly export appears in its dropdowns with no code change.
 ## Page 5 — μητρώα v2
 
 Tabs: **Σύνολο εκλεκτόρων** (browse an annual export) · **Γνωστικά αντικείμενα**
-(the 52 subjects) · **Εξωτερικοί εκλέκτορες ανά αντικείμενο** (a submitted
-workbook, one subject at a time) · **Έλεγχος εγκυρότητας** (cross-check a
+(the 52 subjects) · **Εξωτερικοί εκλέκτορες ανά αντικείμενο** (one subject at a
+time, from **either** the submitted workbook **or** the database — a radio picks
+the source; the database option appears only where there are stored years) · **Έλεγχος εγκυρότητας** (cross-check a
 submitted year against a registry export) · **Αναζήτηση με λέξεις-κλειδιά**
 (find candidates by γνωστικό αντικείμενο, OR/AND, flag those new since a chosen
 year).

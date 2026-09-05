@@ -13,6 +13,7 @@ st.set_page_config(
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import db  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
 
 require_ihu_login()
@@ -38,6 +39,35 @@ CHARAKTIRISMOS_ALIASES = {"ΙΔΙΟ": "ΙΔΙΟΥ", "ΣΥΝΑΦΕΣ": "ΣΥΝΑ�
 
 ID_COL = "Κωδικός Χρήστη"
 SUBJECT_COL = "Γνωστικό Αντικείμενο"
+REASONING_COL = "Αιτιολόγηση συνάφειας"
+
+# Where a table of external electors comes from, in the tab that shows them
+SOURCE_FILE = "Αρχείο Excel"
+SOURCE_DB = "Βάση δεδομένων"
+
+# Rebuilding a stored year to look exactly like the submitted workbook: the
+# registry export names three columns differently from the workbook.
+REGISTRY_TO_WORKBOOK = {
+    "Φορέας": "Φορέας Χρήστη",
+    "Σχολή": "Σχολή Χρήστη",
+    "Τμήμα/Ινστιτούτο": "Τμήμα/Ινστιτούτο Χρήστη",
+}
+# The submitted workbooks' column order, reproduced for the database view
+WORKBOOK_COLUMNS = [
+    "α/α",
+    CHARAKTIRISMOS_COL,
+    ID_COL,
+    "Όνομα",
+    "Επώνυμο",
+    "Κατηγορία Χρήστη",
+    "Φορέας Χρήστη",
+    "Σχολή Χρήστη",
+    "Τμήμα/Ινστιτούτο Χρήστη",
+    "ΦΕΚ Διορισμού",
+    SUBJECT_COL,
+    "Βαθμίδα",
+    REASONING_COL,
+]
 # Fields compared between the year tables and the registry, as
 # (column in the external tables, column in the registry, label)
 COMPARED_FIELDS = [
@@ -148,6 +178,62 @@ def load_external_workbook(path_str: str) -> dict[str, dict]:
             "field": raw.iat[META_ROW, META_FIELD_COL],
             "domain": raw.iat[META_ROW, META_DOMAIN_COL],
             "df": df.fillna(""),
+        }
+    return parsed
+
+
+@st.cache_data
+def load_external_from_db(year: int) -> dict[str, dict]:
+    """Rebuild a stored year in the shape :func:`load_external_workbook` returns.
+
+    The database holds only the decisions (χαρακτηρισμός + αιτιολόγηση). The
+    γνωστικό αντικείμενο and its τομέας come from ``antikeimena.csv``; every
+    column describing the person comes from **that year's** registry export, so
+    the table shows the electors as they stood when the list was submitted.
+
+    Electors no longer in that export are kept, with their columns blank —
+    dropping them would silently shrink a historical table.
+    """
+    decisions = db.load_external_electors(year)
+    if decisions.empty:
+        return {}
+
+    subjects = load_antikeimena().set_index("Code")
+    registry_path = db.registry_file_for_year(year)
+    if registry_path is None:
+        people = pd.DataFrame(columns=[ID_COL])
+    else:
+        people = load_professors(str(registry_path)).rename(columns=REGISTRY_TO_WORKBOOK)
+    people = people.copy()
+    people[ID_COL] = people[ID_COL].astype("int64")
+
+    decisions = decisions.rename(
+        columns={
+            "characterization": CHARAKTIRISMOS_COL,
+            "reasoning": REASONING_COL,
+            "elector_id": ID_COL,
+        }
+    )
+    merged = decisions.merge(people, on=ID_COL, how="left")
+
+    parsed: dict[str, dict] = {}
+    for code, group in merged.groupby("field_code", sort=True):
+        group = group.sort_values(
+            [CHARAKTIRISMOS_COL, "Επώνυμο", "Όνομα"],
+            key=lambda col: (
+                col.ne("ΙΔΙΟΥ") if col.name == CHARAKTIRISMOS_COL
+                else fold_greek_series(col)
+            ),
+        ).reset_index(drop=True)
+        group.insert(0, "α/α", range(1, len(group) + 1))
+
+        columns = [col for col in WORKBOOK_COLUMNS if col in group.columns]
+        subject = subjects.loc[code] if code in subjects.index else None
+        parsed[str(code)] = {
+            "code": code,
+            "field": subject["field"] if subject is not None else f"(άγνωστο {code})",
+            "domain": subject["domain"] if subject is not None else "",
+            "df": group[columns].fillna(""),
         }
     return parsed
 
@@ -470,16 +556,46 @@ with tab_antikeimena:
 
 with tab_external:
     external_files = list_external_files()
+    db_years = db.stored_years()
 
-    if not external_files:
+    sources = [SOURCE_FILE] if external_files else []
+    if db_years:
+        sources.append(SOURCE_DB)
+
+    if not sources:
         st.warning(
-            f"Δεν βρέθηκαν αρχεία `external_<έτος>.xlsx` στον φάκελο {BY_YEAR_DIR}"
+            f"Δεν βρέθηκαν αρχεία `external_<έτος>.xlsx` στον φάκελο {BY_YEAR_DIR} "
+            "ούτε δεδομένα στη βάση."
         )
     else:
+        source = st.radio(
+            "Πηγή δεδομένων", sources, horizontal=True, key="external_source"
+        )
+        if not db_years:
+            st.caption(
+                "Η βάση δεδομένων δεν είναι διαθέσιμη σε αυτό το περιβάλλον "
+                "(είναι προσβάσιμη μόνο από το Railway)."
+                if not db.is_available()
+                else "Η βάση δεδομένων δεν έχει ακόμη καταχωρημένα έτη."
+            )
+
         col_year, col_field = st.columns([1, 4])
-        year = col_year.selectbox("Έτος", list(external_files), key="external_year")
-        external_path = external_files[year]
-        workbook = load_external_workbook(str(external_path))
+        if source == SOURCE_DB:
+            year = col_year.selectbox(
+                "Έτος", db_years, key="external_year_db", format_func=str
+            )
+            workbook = load_external_from_db(year)
+            registry_path = db.registry_file_for_year(year)
+            origin = (
+                f"βάση δεδομένων · στοιχεία εκλεκτόρων από `{registry_path.name}`"
+                if registry_path
+                else "βάση δεδομένων · **χωρίς** μητρώο για αυτό το έτος"
+            )
+        else:
+            year = col_year.selectbox("Έτος", list(external_files), key="external_year")
+            external_path = external_files[year]
+            workbook = load_external_workbook(str(external_path))
+            origin = f"αρχείο `{external_path.name}`"
 
         # Label each sheet with its own code + γνωστικό αντικείμενο, ordered by code
         labels = {
@@ -494,9 +610,16 @@ with tab_external:
 
         st.markdown(f"### {entry['field']}")
         st.caption(
-            f"Κωδικός {entry['code']} · Επιστημονικό πεδίο: {entry['domain']} · "
-            f"αρχείο `{external_path.name}`"
+            f"Κωδικός {entry['code']} · Επιστημονικό πεδίο: {entry['domain']} · {origin}"
         )
+
+        if source == SOURCE_DB and ID_COL in df_ext.columns and "Επώνυμο" in df_ext.columns:
+            orphans = int((df_ext["Επώνυμο"].astype(str).str.strip() == "").sum())
+            if orphans:
+                st.warning(
+                    f"{orphans} εκλέκτορες δεν βρέθηκαν στο μητρώο του {year} — "
+                    "εμφανίζονται με κενά στοιχεία."
+                )
 
         if CHARAKTIRISMOS_COL in df_ext.columns:
             counts = df_ext[CHARAKTIRISMOS_COL].value_counts()
