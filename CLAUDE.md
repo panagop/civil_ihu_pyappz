@@ -16,6 +16,8 @@ civil_ihu_pyappz/
 │   ├── home.py                       # Landing page + Microsoft login/logout UI
 │   ├── auth.py                       # OIDC gate helpers (require_ihu_login, render_login_block)
 │   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
+│   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
+│   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
 │   ├── pages/
 │   │   ├── 1_📇_perigrammata.py      # Course syllabi — gate currently commented out
 │   │   ├── 2_📊_mitroa.py            # Course registries — gate currently commented out
@@ -32,6 +34,7 @@ civil_ihu_pyappz/
 │       ├── professors_tables/        # Annual ΑΠΕΛΛΑ exports (.parquet/.feather/.xlsx)
 │       ├── mitroa_by_year/           # Submitted external-elector workbooks (external_<year>.xlsx)
 │       ├── antikeimena.csv           # The 52 γνωστικά αντικείμενα (Code, field, domain)
+│       ├── registry_snapshots.csv    # year -> which professors_export_*.parquet to join
 │       └── json2024/, json2025/      # Older JSON exports
 ├── jupyter/                          # Exploration notebooks (not part of app)
 ├── plans/                            # Implementation plans (markdown)
@@ -48,7 +51,7 @@ uv sync           # install all dependencies
 uv sync --extra dev   # include dev tools (pytest, ruff, black)
 ```
 
-Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep), `pandas`, `openpyxl`, `python-docx`, `docxtpl`, `streamlit-calendar`, `pydantic`.
+Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep), `pandas`, `openpyxl`, `python-docx`, `docxtpl`, `streamlit-calendar`, `pydantic`, `sqlalchemy` + `psycopg[binary]` (Postgres).
 
 ## Secrets / credentials
 
@@ -107,11 +110,11 @@ startup.
 ## Authentication
 
 > **Currently DISABLED.** The `require_ihu_login()` calls in pages 1, 2 and 5 are
-> commented out (2026-09-05), so every page is open. `render_login_block()` in
-> `home.py` is still active: with no `[auth]` in secrets the button renders but
-> `st.login()` fails if clicked. Re-enable by uncommenting the import + call at
-> the top of each protected page. Note this makes page 5 — the full ΑΠΕΛΛΑ
-> registry, ~20k people — publicly readable wherever the app is deployed.
+> commented out (2026-09-05), so every page is open, and `render_login_block()`
+> is commented out in `home.py` too — there is no login button at all. Re-enable
+> by uncommenting the import + call in `home.py` and at the top of each protected
+> page. Note this makes page 5 — the full ΑΠΕΛΛΑ registry, ~20k people —
+> publicly readable wherever the app is deployed.
 
 Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
 
@@ -161,6 +164,57 @@ If OIDC is re-enabled on a host, its `<host>/oauth2callback` must be added to
 the Azure App Registration (Web platform) *and* that host's `redirect_uri` must
 match — all three environments can be registered simultaneously.
 
+## Database (Postgres on Railway)
+
+Managed Postgres service `Postgres` — `c8e64954-3bab-4655-9d38-a32e4a12d44c`,
+in the same project, with a volume. **Deliberately has no public TCP proxy**:
+it is reachable only from inside Railway, over the private network. The app
+service reads it through `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
+
+Consequences to keep in mind:
+
+- **You cannot connect from a developer machine or from Streamlit Cloud.**
+  There is no `DATABASE_PUBLIC_URL`. Anything requiring the database must run
+  inside Railway.
+- Locally and on Streamlit Cloud there is no `DATABASE_URL`, so
+  `db.get_engine()` returns `None`. Every DB-backed feature **must degrade, not
+  crash** — the file-backed tabs of page 5 keep working in all three
+  environments.
+- Because nothing outside Railway can seed it, the schema and the historical
+  data are installed **by the app itself on first start**:
+  `home.py` → `db.bootstrap()` (a `@st.cache_resource`, so once per process).
+  Both steps are idempotent. Its status line is printed to stdout as
+  `[db.bootstrap] ...` — the deployment logs are the only way to check it.
+
+### `external_electors`
+
+One row per (year, γνωστικό αντικείμενο, elector) — see [streamlit/db.py](streamlit/db.py):
+
+| Column | Notes |
+| ------ | ----- |
+| `year`, `field_code`, `elector_id` | composite primary key |
+| `characterization` | `TEXT` + `CHECK IN ('ΙΔΙΟΥ','ΣΥΝΑΦΟΥΣ')` — not a boolean, so a third category costs no migration |
+| `reasoning` | «Αιτιολόγηση συνάφειας» |
+| `created_at` | |
+
+Only the *decisions* live here. Name, φορέας, βαθμίδα, ΦΕΚ etc. are joined in
+from **that year's** ΑΠΕΛΛΑ export at display time, so they are never
+duplicated and a historical table still renders as it was submitted. The
+year → export mapping is [files/mitroa/registry_snapshots.csv](files/mitroa/registry_snapshots.csv)
+(`db.registry_file_for_year`) — a file, not a table, because it must also
+resolve where there is no database, and because the export filenames are date
+stamps rather than years. **Never delete an old parquet export**: without it
+that year's table cannot be reconstructed.
+
+The `α/α` column is deliberately not stored — it is derived on render. (Only
+9 of the 52 sheets in `external_2025.xlsx` reproduce exactly by sorting ΙΔΙΟΥ
+first then alphabetically; the rest carry hand-placed rows. That is noise, not
+information.)
+
+Seeding lives in [streamlit/seed_external.py](streamlit/seed_external.py),
+which parses `external_<year>.xlsx` and skips any year that already has rows.
+2025 loads as 1.476 rows / 52 αντικείμενα / 500 distinct electors.
+
 ## Active data files
 
 Update these paths inside the page files when switching academic year:
@@ -205,8 +259,15 @@ Domain rules encoded in page 5:
   ΝΑΙ/ΟΧΙ *values*, so renamed columns keep working.
 - **Κατηγορία Χρήστη is never compared across years** — the exports relabelled it
   (`Ημεδαπής` → `Καθηγητής Ημεδαπής`), which would produce 179 false findings.
-- Χαρακτηρισμός is spelled inconsistently in the workbooks (`ΙΔΙΟ`/`ΙΔΙΟΥ`,
-  `ΣΥΝΑΦΕΣ`/`ΣΥΝΑΦΟΥΣ`); normalised via `CHARAKTIRISMOS_ALIASES`.
+- Χαρακτηρισμός is spelled inconsistently in the workbooks, in **both** the
+  values (`ΙΔΙΟ`/`ΙΔΙΟΥ`, `ΣΥΝΑΦΕΣ`/`ΣΥΝΑΦΟΥΣ` — normalised via
+  `CHARAKTIRISMOS_ALIASES`) and the column header itself
+  (`Χαρακτηρισμός` vs the soft-hyphenated `Χαρακτη-ρισμός`). **Never match a
+  workbook header literally** — `load_external_workbook` renames it to the
+  canonical `CHARAKTIRISMOS_COL` using `fold_header` (fold_greek with
+  non-letters dropped). A literal constant silently matched nothing and left
+  the ΙΔΙΟΥ/ΣΥΝΑΦΟΥΣ metrics, filter and comparison column dead until
+  2026-09-05. `seed_external.py` matches its headers the same way.
 
 ### Greek text matching
 

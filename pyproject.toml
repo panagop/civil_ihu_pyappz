@@ -24,6 +24,8 @@ dependencies = [
     "pydantic>=2.12.3",
     "xlsxwriter>=3.2.9",
     "ics>=0.7.2",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]

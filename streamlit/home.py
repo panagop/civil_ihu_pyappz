@@ -20,3 +20,11 @@ st.set_page_config(page_title="Περιγράμματα μαθημάτων", pag
 
 st.title("Civil Engineering — IHU")
 # render_login_block()
+
+# The Postgres database is reachable only from inside Railway, so its schema
+# and the historical data are installed here, on first start. Runs once per
+# process and is a no-op everywhere else (no DATABASE_URL).
+import db  # noqa: E402
+
+if db.is_available():
+    st.sidebar.caption(db.bootstrap())

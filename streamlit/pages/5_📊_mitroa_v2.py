@@ -28,7 +28,11 @@ META_CODE_COL = 4
 META_FIELD_COL = 5
 META_DOMAIN_COL = 10
 HEADER_ROW = 8         # row holding the α/α ... Αιτιολόγηση συνάφειας table header
-CHARAKTIRISMOS_COL = "Χαρακτη-ρισμός"
+# Canonical name for the characterisation column. The workbooks are not
+# consistent — external_2025.xlsx spells it plainly, older ones soft-hyphenate
+# it as "Χαρακτη-ρισμός" — so load_external_workbook renames whatever it finds
+# to this and everything downstream relies on the one name.
+CHARAKTIRISMOS_COL = "Χαρακτηρισμός"
 # The workbooks spell the two characterisations inconsistently
 CHARAKTIRISMOS_ALIASES = {"ΙΔΙΟ": "ΙΔΙΟΥ", "ΣΥΝΑΦΕΣ": "ΣΥΝΑΦΟΥΣ"}
 
@@ -125,6 +129,13 @@ def load_external_workbook(path_str: str) -> dict[str, dict]:
             df = df.drop(columns="α/α")
         df = df.reset_index(drop=True)
         df.insert(0, "α/α", range(1, len(df) + 1))
+        df = df.rename(
+            columns={
+                col: CHARAKTIRISMOS_COL
+                for col in df.columns
+                if fold_header(col) == fold_header(CHARAKTIRISMOS_COL)
+            }
+        )
         if CHARAKTIRISMOS_COL in df.columns:
             df[CHARAKTIRISMOS_COL] = (
                 df[CHARAKTIRISMOS_COL]
@@ -162,6 +173,15 @@ def fold_greek(text: str) -> str:
     decomposed = unicodedata.normalize("NFD", str(text))
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
     return stripped.casefold().replace("ς", "σ")
+
+
+def fold_header(text: str) -> str:
+    """:func:`fold_greek` with every non-letter dropped, for matching headers.
+
+    Lets a header match whether or not it carries a stray hyphen, space or
+    line break from the spreadsheet.
+    """
+    return re.sub(r"[^0-9a-zα-ω]", "", fold_greek(text))
 
 
 # Built from code points rather than written as "̀-ͯ": the parquet
@@ -380,7 +400,7 @@ with tab_eklektores:
     if "Φορέας" in filtered.columns:
         col_foreis.metric("Φορείς", f"{filtered['Φορέας'].nunique():,}")
 
-    st.dataframe(filtered, use_container_width=True, hide_index=True)
+    st.dataframe(filtered, width='stretch', hide_index=True)
 
     col_xlsx, col_csv = st.columns(2)
     stem = f"eklektores_{selected_path.stem.replace('professors_export_', '')}"
