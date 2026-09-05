@@ -15,18 +15,24 @@ civil_ihu_pyappz/
 ├── streamlit/                        # Streamlit app (entry point + pages)
 │   ├── home.py                       # Landing page + Microsoft login/logout UI
 │   ├── auth.py                       # OIDC gate helpers (require_ihu_login, render_login_block)
+│   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
 │   ├── pages/
-│   │   ├── 1_📇_perigrammata.py      # Course syllabi — PROTECTED (requires @ihu.gr login)
-│   │   ├── 2_📊_mitroa.py            # Course registries — PROTECTED (requires @ihu.gr login)
+│   │   ├── 1_📇_perigrammata.py      # Course syllabi — gate currently commented out
+│   │   ├── 2_📊_mitroa.py            # Course registries — gate currently commented out
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
-│   │   └── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
+│   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
+│   │   └── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — reads files/mitroa/, no secrets
 │   └── .streamlit/
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
 ├── civil_ihu_pyappz/                 # Python package (legacy; perigrammata.py not used by the app)
 ├── files/
 │   ├── exams/                        # Exam Excel files (.xlsm); active: exams-2026-06.xlsm
-│   └── timetables/                   # Timetable Excel files (.xlsm); active: 2025-2026.xlsm
-│   └── mitroa/                       # Registry JSON exports (json2024/, json2025/)
+│   ├── timetables/                   # Timetable Excel files (.xlsm); active: 2025-2026.xlsm
+│   └── mitroa/                       # Registries — see "Registry data files" below
+│       ├── professors_tables/        # Annual ΑΠΕΛΛΑ exports (.parquet/.feather/.xlsx)
+│       ├── mitroa_by_year/           # Submitted external-elector workbooks (external_<year>.xlsx)
+│       ├── antikeimena.csv           # The 52 γνωστικά αντικείμενα (Code, field, domain)
+│       └── json2024/, json2025/      # Older JSON exports
 ├── jupyter/                          # Exploration notebooks (not part of app)
 ├── plans/                            # Implementation plans (markdown)
 ├── tests/                            # Minimal tests (pytest)
@@ -46,13 +52,15 @@ Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep
 
 ## Secrets / credentials
 
+Settings are read through [streamlit/settings.py](streamlit/settings.py), **never
+`st.secrets` directly** — see "Settings lookup" below for why.
+
 `streamlit/.streamlit/secrets.toml` is gitignored. On a new machine, create it manually with:
 
 ```toml
-gsheets_id_perigrammata = "..."
-gsheets_id_mitroa_eklektores = "..."
-gsheets_id_mitroa_antikeimena = "..."
-# add any other Sheet IDs used by the pages
+gsheet_perigrammata_id = "..."
+gsheet_mitroa_id = "..."
+gsheet_exams_schedule_id = "..."
 
 # Optional: restrict access to specific @ihu.gr emails. If omitted or empty,
 # ANY @ihu.gr account is allowed. See "Authentication" section below.
@@ -70,7 +78,40 @@ server_metadata_url = "https://login.microsoftonline.com/<TENANT_ID>/v2.0/.well-
 
 The Google Sheets are accessed as public CSV exports (no OAuth needed, just the sheet IDs).
 
+### Settings lookup (works locally, on Streamlit Cloud AND on Railway)
+
+`st.secrets` reads **only TOML files** — there is no environment-variable
+fallback, so plain env vars on a host like Railway are invisible to it. Worse,
+when no secrets file exists at all it **raises `StreamlitSecretNotFoundError`**
+rather than reporting a missing key: `st.secrets.get(key, default)` and
+`"key" in st.secrets` raise too, so neither can be used to probe safely.
+
+[streamlit/settings.py](streamlit/settings.py) papers over this. It tries
+`st.secrets` first (so behaviour is unchanged wherever a file exists) and falls
+back to `os.environ`:
+
+| Environment | Source |
+|-------------|--------|
+| Local | `streamlit/.streamlit/secrets.toml` |
+| Streamlit Cloud | Cloud dashboard secrets |
+| Railway | service environment variables (same key names) |
+
+- `get_secret(key, default=None)` — value or default.
+- `get_secret_list(key)` — list; a comma-separated string (env) is split.
+- `require_secret(key)` — value, or `st.error` + `st.stop()` with a clear message.
+
+Use these in new pages. Nested TOML (like `[auth]`) has no env-var equivalent —
+on a host without a secrets file, OIDC needs a real `secrets.toml` written at
+startup.
+
 ## Authentication
+
+> **Currently DISABLED.** The `require_ihu_login()` calls in pages 1, 2 and 5 are
+> commented out (2026-09-05), so every page is open. `render_login_block()` in
+> `home.py` is still active: with no `[auth]` in secrets the button renders but
+> `st.login()` fails if clicked. Re-enable by uncommenting the import + call at
+> the top of each protected page. Note this makes page 5 — the full ΑΠΕΛΛΑ
+> registry, ~20k people — publicly readable wherever the app is deployed.
 
 Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
 
@@ -94,6 +135,32 @@ These cost hours during initial setup (2026-05-13); read before debugging auth i
 - **Streamlit Cloud secrets are SEPARATE** from the local `secrets.toml`. Edit them independently in the Cloud dashboard (Settings → Secrets). Only `redirect_uri` should differ between them.
 - Azure App Registration must have **both** redirect URIs registered under the **Web** platform: `http://localhost:8501/oauth2callback` and `https://<app>.streamlit.app/oauth2callback`. Use the plain `/oauth2callback` path — **not** `/~/+/oauth2callback` (that workaround is for Auth0, not Microsoft).
 
+## Deployment
+
+The app runs in **three places at once** from the same `main` branch; all three
+must keep working. Both hosts auto-deploy on push.
+
+| Target | URL | Secrets |
+|--------|-----|---------|
+| Local | `localhost:8501` | `streamlit/.streamlit/secrets.toml` |
+| Streamlit Cloud | `https://<app>.streamlit.app` | Cloud dashboard |
+| Railway | `https://civil-ihu.up.railway.app` | service env vars |
+
+Railway (workspace "Georgios Panagopoulos's Projects", Hobby plan):
+
+- Project `civil-ihu-pyappz` — `3e0a1fa7-993f-4f3b-8f8e-9b67d35f0858`
+- Service `civil-ihu-pyappz` — `90a05a29-32ff-4d6a-9e8a-3ff28073fcdd`
+- Builder Railpack; start command
+  `streamlit run streamlit/home.py --server.port $PORT --server.address 0.0.0.0`
+- Variables set: `gsheet_perigrammata_id`, `gsheet_mitroa_id`,
+  `gsheet_exams_schedule_id` (flat env vars — resolved via `settings.py`)
+- The container filesystem is **ephemeral**: generated files do not survive a
+  restart. Anything to keep must be downloaded and committed to the repo.
+
+If OIDC is re-enabled on a host, its `<host>/oauth2callback` must be added to
+the Azure App Registration (Web platform) *and* that host's `redirect_uri` must
+match — all three environments can be registered simultaneously.
+
 ## Active data files
 
 Update these paths inside the page files when switching academic year:
@@ -102,6 +169,55 @@ Update these paths inside the page files when switching academic year:
 |------|-------------|
 | Exam schedule | `files/exams/exams-2026-06.xlsm` |
 | Timetable | `files/timetables/2025-2026.xlsm` |
+
+Pages 3 and 4 hardcode their file; page 5 discovers files by glob, so a new
+yearly export appears in its dropdowns with no code change.
+
+## Page 5 — μητρώα v2
+
+Tabs: **Σύνολο εκλεκτόρων** (browse an annual export) · **Γνωστικά αντικείμενα**
+(the 52 subjects) · **Εξωτερικοί εκλέκτορες ανά αντικείμενο** (a submitted
+workbook, one subject at a time) · **Έλεγχος εγκυρότητας** (cross-check a
+submitted year against a registry export) · **Αναζήτηση με λέξεις-κλειδιά**
+(find candidates by γνωστικό αντικείμενο, OR/AND, flag those new since a chosen
+year).
+
+Reads only local files — no secrets, no network.
+
+### Registry data files
+
+- `files/mitroa/professors_tables/professors_export_<YYYYMMDD>.parquet` — annual
+  ΑΠΕΛΛΑ export. **Schemas differ between years**: 2024/2025 have `Σε αναστολή`
+  and `Παρ. 1, Άρ. 145, Ν. 4957/2022`; 2026 replaced these with `Ενεργή
+  άδεια/κώλυμα αποκλεισμού από μητρώα` and `... από εκλεκτορικά/επιτροπές`. Code
+  must tolerate this — never assume a fixed column set.
+- `files/mitroa/mitroa_by_year/external_<year>.xlsx` — the submitted external
+  electors. One worksheet per γνωστικό αντικείμενο, **named by code** (555–606);
+  the readable title sits at row 6 (0-based `META_ROW`), the table header at row
+  9 (`HEADER_ROW`). The `α/α` column holds spreadsheet formulas — renumber it.
+- `files/mitroa/antikeimena.csv` — the 52 αντικείμενα (`Code, field, domain`).
+
+Domain rules encoded in page 5:
+
+- **Only `κώλυμα αποκλεισμού από μητρώα` disqualifies** (and legacy `Σε
+  αναστολή`). Exclusion from εκλεκτορικά/επιτροπές is reported but does not
+  block — see `BLOCKING_FLAG_KEYWORDS`. Flag columns are detected by their
+  ΝΑΙ/ΟΧΙ *values*, so renamed columns keep working.
+- **Κατηγορία Χρήστη is never compared across years** — the exports relabelled it
+  (`Ημεδαπής` → `Καθηγητής Ημεδαπής`), which would produce 179 false findings.
+- Χαρακτηρισμός is spelled inconsistently in the workbooks (`ΙΔΙΟ`/`ΙΔΙΟΥ`,
+  `ΣΥΝΑΦΕΣ`/`ΣΥΝΑΦΟΥΣ`); normalised via `CHARAKTIRISMOS_ALIASES`.
+
+### Greek text matching
+
+Use `fold_greek` / `fold_greek_series`, not `casefold()`. Plain casefolding fails
+twice over: `σκυροδέμ` does not match `Σκυρόδεμα` (the accent sits on a different
+vowel) and `ς` does not fold to `σ`. The helpers strip combining accents, casefold
+and unify final sigma.
+
+The parquet columns are Arrow-backed, so pandas runs their regexes through
+**RE2, which rejects `\u` escapes** — build character classes from `chr()` (see
+`COMBINING_MARKS_RE`) rather than writing `"[̀-ͯ]"`.
 
 ## Known improvement backlog
 
