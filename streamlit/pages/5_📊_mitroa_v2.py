@@ -15,6 +15,7 @@ st.set_page_config(
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
+import proposals_ui  # noqa: E402
 from external_report import build_report  # noqa: E402
 
 require_ihu_login()
@@ -45,6 +46,11 @@ REASONING_COL = "Αιτιολόγηση συνάφειας"
 # Where a table of external electors comes from, in the tab that shows them
 SOURCE_FILE = "Αρχείο Excel"
 SOURCE_DB = "Βάση δεδομένων"
+
+# The year being prepared, and the finalised year it starts from. Bump both
+# when the next cycle begins — the tab and the registry snapshot follow.
+WORKING_YEAR = 2026
+BASELINE_YEAR = 2025
 
 # Rebuilding a stored year to look exactly like the submitted workbook: the
 # registry export names three columns differently from the workbook.
@@ -437,13 +443,21 @@ def apply_text_search(df: pd.DataFrame, query: str) -> pd.DataFrame:
 
 st.markdown("## Μητρώα γνωστικών αντικειμένων (v2)")
 
-tab_eklektores, tab_antikeimena, tab_external, tab_check, tab_keywords = st.tabs(
+(
+    tab_eklektores,
+    tab_antikeimena,
+    tab_external,
+    tab_check,
+    tab_keywords,
+    tab_proposals,
+) = st.tabs(
     [
         "Σύνολο εκλεκτόρων",
         "Γνωστικά αντικείμενα",
         "Εξωτερικοί εκλέκτορες ανά αντικείμενο",
         "Έλεγχος εγκυρότητας",
         "Αναζήτηση με λέξεις-κλειδιά",
+        f"Προετοιμασία {WORKING_YEAR}",
     ]
 )
 
@@ -902,3 +916,28 @@ with tab_keywords:
 
         with st.expander("Πλήθος ανά λέξη-κλειδί"):
             st.dataframe(per_keyword, use_container_width=True, hide_index=True)
+
+
+with tab_proposals:
+    registry_path = db.registry_file_for_year(WORKING_YEAR)
+    if registry_path is None:
+        st.error(
+            f"Δεν έχει οριστεί μητρώο για το {WORKING_YEAR} στο "
+            "`files/mitroa/registry_snapshots.csv`."
+        )
+    else:
+        registry_now = load_professors(str(registry_path))
+        blocking_now, _ = split_flag_columns(registry_now)
+        st.caption(
+            f"Μητρώο αναφοράς: `{registry_path.name}` · "
+            f"στήλη κωλύματος: {', '.join(f'«{c}»' for c in blocking_now) or '—'}"
+        )
+        proposals_ui.render(
+            year=WORKING_YEAR,
+            baseline_year=BASELINE_YEAR,
+            registry=registry_now,
+            antikeimena=load_antikeimena(),
+            blocking_cols=blocking_now,
+            fold=fold_greek_series,
+            user_email=getattr(st.user, "email", "") or "",
+        )

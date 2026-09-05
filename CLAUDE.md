@@ -19,6 +19,7 @@ civil_ihu_pyappz/
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
 │   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
 │   ├── external_report.py            # Consolidated Word report (landscape A4)
+│   ├── proposals_ui.py               # "Προετοιμασία <έτους>" tab — the only writing UI
 │   ├── pages/
 │   │   ├── 1_📇_perigrammata.py      # Course syllabi — login gate ACTIVE
 │   │   ├── 2_📊_mitroa.py            # Course registries — login gate ACTIVE
@@ -274,6 +275,14 @@ later accepted one wins; `ΧΑΡΑΚΤΗΡΙΣΜΟΣ`/`ΑΙΤΙΟΛΟΓΗΣΗ` a
 has since been removed are **no-ops, not errors**. `finalize_year` refuses while
 any proposal is still pending.
 
+The tab lives in [streamlit/proposals_ui.py](streamlit/proposals_ui.py) — the
+only part of the app that writes anything. Per-subject it shows the computed
+table (🔴 on anyone with a κώλυμα in the current registry, and ➕➖🔄✏️ for
+pending proposals), then sub-tabs for Μεταβολή / Προσθήκη / Οι προτάσεις μου,
+and a coordinator-only section to decide proposals and lock the year. Actions
+sit in a form under the table rather than as buttons on each row: ~26 electors
+× 3 buttons would rebuild ~80 widgets per rerun for a worse layout.
+
 Roles are two, and there is deliberately **no users table**: a coordinator is an
 email listed in the `coordinator_emails` setting (same mechanism as
 `allowed_emails`), everyone else who passes the login gate is a member. Members
@@ -325,7 +334,12 @@ time, from **either** the submitted workbook **or** the database — a radio pic
 the source; the database option appears only where there are stored years) · **Έλεγχος εγκυρότητας** (cross-check a
 submitted year against a registry export) · **Αναζήτηση με λέξεις-κλειδιά**
 (find candidates by γνωστικό αντικείμενο, OR/AND, flag those new since a chosen
-year).
+year) · **Προετοιμασία <έτους>** (propose, decide and finalise the year being
+prepared — see below).
+
+`WORKING_YEAR` / `BASELINE_YEAR` at the top of the page name the year being
+prepared and the finalised one it starts from. Bump both when the next cycle
+begins, and add the new registry export to `registry_snapshots.csv`.
 
 Reads only local files — no secrets, no network.
 

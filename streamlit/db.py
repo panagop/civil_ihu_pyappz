@@ -148,6 +148,19 @@ def bootstrap() -> str:
         from seed_external import seed_historical_years
 
         status = seed_historical_years(engine)
+        # Report the tables too: without SSH into the container, and with no
+        # public proxy to the database, the log line is the only way to confirm
+        # a schema change actually landed.
+        with engine.connect() as conn:
+            tables = sorted(
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                    )
+                )
+            )
+        status = f"{status} · πίνακες: {', '.join(tables) or '(κανένας)'}"
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         status = f"Σφάλμα βάσης: {exc}"
     # Also to stdout: the database is unreachable from outside Railway, so the
