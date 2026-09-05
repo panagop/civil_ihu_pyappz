@@ -18,6 +18,7 @@ civil_ihu_pyappz/
 │   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
 │   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
+│   ├── external_report.py            # Consolidated Word report (landscape A4)
 │   ├── pages/
 │   │   ├── 1_📇_perigrammata.py      # Course syllabi — login gate ACTIVE
 │   │   ├── 2_📊_mitroa.py            # Course registries — login gate ACTIVE
@@ -237,10 +238,32 @@ Seeding lives in [streamlit/seed_external.py](streamlit/seed_external.py),
 which parses `external_<year>.xlsx` and skips any year that already has rows.
 2025 loads as 1.476 rows / 52 αντικείμενα / 500 distinct electors.
 
+**Direction of travel:** from 2026 on there is to be **no `external_<year>.xlsx`
+at all** — the year is built and kept in the database, and the workbooks that
+exist stay only as the historical record. Keep the file source working for those
+years; do not build new features that require one.
+
 `load_external_from_db` (page 5) rebuilds a stored year in exactly the shape
 `load_external_workbook` returns — same keys, same column order — so the tab
 renders either source with one code path. Electors missing from that year's
 export are kept with blank columns and counted in a warning, never dropped.
+
+### Consolidated report
+
+[streamlit/external_report.py](streamlit/external_report.py) builds one Word
+document covering all 52 subjects — a summary table, then a landscape A4 page
+each. It takes the same parsed structure either source produces, so the button
+works identically for file and database. ~9 s for 1.476 rows, so it sits behind
+a button and a spinner rather than being built on load.
+
+**Word, not PDF, on purpose.** `docx2pdf` (already in `pyproject.toml`) shells
+out to a real Microsoft Word install and is Windows-only — it cannot run in the
+Railway container at all. PDF there would mean WeasyPrint/wkhtmltopdf and system
+packages, for a document that gets edited before submission anyway.
+
+Column widths in `COLUMN_WIDTHS` total 27.6 cm against the 27.7 cm usable on
+landscape A4 at 1 cm margins. **Word silently ignores every width if the total
+overflows the page**, so adding a column means taking the room from another.
 
 **The database view is not byte-identical to the workbook, by design.** Of
 13.284 compared cells for 2025, 475 differ: 40 are only capitalisation (the

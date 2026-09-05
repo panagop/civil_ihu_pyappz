@@ -15,6 +15,7 @@ st.set_page_config(
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
+from external_report import build_report  # noqa: E402
 
 require_ihu_login()
 
@@ -638,13 +639,37 @@ with tab_external:
 
         st.dataframe(df_ext, use_container_width=True, hide_index=True)
 
-        st.download_button(
-            "Λήψη Excel",
+        col_one, col_all = st.columns(2)
+        col_one.download_button(
+            "Λήψη Excel (τρέχον αντικείμενο)",
             data=to_excel_bytes(df_ext),
             file_name=f"external_{year}_{entry['code']}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="external_download",
         )
+
+        # Built on demand rather than up front: 52 subjects take a few seconds
+        # and most visits to this tab only want one of them.
+        if col_all.button("Συγκεντρωτική αναφορά Word (όλα τα αντικείμενα)"):
+            with st.spinner(f"Δημιουργία αναφοράς για {len(workbook)} αντικείμενα…"):
+                st.session_state["external_report"] = (
+                    build_report(workbook, year, source),
+                    f"ekloktores_{year}.docx",
+                )
+
+        if "external_report" in st.session_state:
+            report, filename = st.session_state["external_report"]
+            st.download_button(
+                f"Λήψη «{filename}»",
+                data=report,
+                file_name=filename,
+                mime=(
+                    "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                ),
+                key="external_report_download",
+                type="primary",
+            )
 
 
 with tab_check:
