@@ -108,6 +108,12 @@ LOCKED = "ΚΛΕΙΔΩΜΕΝΟ"
 # reason still appears in the report's table of changes.
 AUTO_STATUS = "ΑΥΤΟΜΑΤΗ"
 AUTO_REMOVAL_NOTE = "Διαγραφή λόγω μη επιλεξιμότητας στο μητρώο του ΑΠΕΛΛΑ"
+# An elector whose βαθμίδα, φορέας or γνωστικό αντικείμενο moved in the registry
+# stays in the table, but the report has to say so: the submitted document
+# carries those values, so a reader must see they were updated rather than
+# wonder why they differ from last year's.
+REGISTRY_UPDATE = "ΕΝΗΜΕΡΩΣΗ"
+REGISTRY_UPDATE_NOTE = "Ενημέρωση στοιχείων σύμφωνα με το μητρώο του ΑΠΕΛΛΑ"
 
 ADD = "ΠΡΟΣΘΗΚΗ"
 REMOVE = "ΑΦΑΙΡΕΣΗ"

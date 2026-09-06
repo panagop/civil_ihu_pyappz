@@ -385,10 +385,22 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
         )
 
 
+# The order changes read in, within a subject
+ENTRY_ORDER = [db.REMOVE, db.ADD, db.MODIFY, db.RECHARACTERIZE, db.REJUSTIFY,
+               db.REGISTRY_UPDATE]
+
+
 def _change_entries(
-    year: int, registry_by_id: dict, auto_removed: pd.DataFrame
+    year: int, registry_by_id: dict, auto_removed: pd.DataFrame,
+    table: pd.DataFrame | None = None,
+    registry_moves: dict[int, str] | None = None,
 ) -> dict[str, list[dict]]:
-    """Per subject code, the accepted and pending changes with their reasons.
+    """Per subject code, everything that changed since the baseline, with why.
+
+    Three sources, because they leave three different traces: proposals (a row
+    in `proposals`), automatic removals for lost eligibility (no row at all),
+    and registry updates — βαθμίδα, φορέας, γνωστικό αντικείμενο — which are
+    not changes to the list but *are* changes to what the list prints.
 
     Rejected and withdrawn proposals are left out: the department is being
     shown what moved, not what was considered.
@@ -407,9 +419,25 @@ def _change_entries(
             }
         )
 
+    # Registry updates, for the electors still in the table
+    if registry_moves and table is not None and not table.empty:
+        for row in table.itertuples(index=False):
+            elector = int(row.elector_id)
+            if elector not in registry_moves:
+                continue
+            entries.setdefault(str(int(row.field_code)), []).append(
+                {
+                    "action": db.REGISTRY_UPDATE,
+                    "person": _person_label(registry_by_id, elector),
+                    "detail": registry_moves[elector],
+                    "note": db.REGISTRY_UPDATE_NOTE,
+                    "status": db.AUTO_STATUS,
+                }
+            )
+
     proposals = db.list_proposals(year)
     if proposals.empty:
-        return entries
+        return _ordered(entries)
     proposals = proposals[proposals["status"].isin([db.ACCEPTED, db.PENDING])]
 
     for row in proposals.itertuples(index=False):
@@ -428,12 +456,21 @@ def _change_entries(
                 "status": row.status,
             }
         )
-    return entries
+    return _ordered(entries)
+
+
+def _ordered(entries: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    rank = {action: index for index, action in enumerate(ENTRY_ORDER)}
+    return {
+        code: sorted(items, key=lambda e: (rank.get(e["action"], 99), e["person"]))
+        for code, items in entries.items()
+    }
 
 
 def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFrame,
                   people: pd.DataFrame, fold, registry_by_id: dict,
-                  locked: bool, auto_removed: pd.DataFrame) -> None:
+                  locked: bool, auto_removed: pd.DataFrame,
+                  registry_moves: dict[int, str]) -> None:
     """Generate the consolidated Word report for the year as it now stands."""
     st.caption(
         "Ο ίδιος πίνακας που κατατίθεται, για όλα τα αντικείμενα, με έναν "
@@ -460,7 +497,10 @@ def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFr
                     workbook,
                     year,
                     "βάση δεδομένων",
-                    changes=_change_entries(year, registry_by_id, auto_removed),
+                    changes=_change_entries(
+                        year, registry_by_id, auto_removed,
+                        projected_all, registry_moves,
+                    ),
                     draft=not locked,
                 ),
                 f"ekloktores_{year}{'' if locked else '_προχειρο'}.docx",
@@ -708,6 +748,7 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         db.working_electors(year, include_pending=True, blocked_ids=blocked),
         antikeimena, people, fold, registry_by_id, locked,
         db.auto_removals(year, blocked, include_pending=True),
+        changes,
     )
 
     if coordinator:

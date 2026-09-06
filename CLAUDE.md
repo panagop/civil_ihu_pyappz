@@ -345,6 +345,16 @@ look at, and the report prints them with `AUTO_REMOVAL_NOTE` ("Διαγραφή 
 58 rows / 34 people across 32 subjects. Members still propose *other* removals
 themselves, with their own justification.
 
+The report's change table has **three sources**, because each leaves a different
+trace: proposals (a row in `proposals`), automatic removals (no row at all), and
+**registry updates** — βαθμίδα, φορέας, γνωστικό αντικείμενο moving between the
+baseline year's export and the current one (`registry_changes`, action
+`ΕΝΗΜΕΡΩΣΗ`). The last are not changes to the list, but they *are* changes to
+what the list prints, so a reader must see the values were updated rather than
+wonder why they differ from last year. Entries are ordered
+ΑΦΑΙΡΕΣΗ → ΠΡΟΣΘΗΚΗ → ΜΕΤΑΒΟΛΗ → ΕΝΗΜΕΡΩΣΗ within a subject. For 2026: 58
+removals and 132 registry updates, so every one of the 52 subjects has a table.
+
 Roles are two, and there is deliberately **no users table**: a coordinator is an
 email listed in the `coordinator_emails` setting (same mechanism as
 `allowed_emails`), everyone else who passes the login gate is a member. Members
