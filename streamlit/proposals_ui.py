@@ -298,6 +298,69 @@ def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
             st.rerun()
 
 
+def _preview_block(year: int, field_code: int, current: pd.DataFrame,
+                   registry_by_id: dict, blocked: set[int],
+                   changes: dict[int, str]) -> None:
+    """The table as it would stand if every pending proposal were approved."""
+    projected_all = db.working_electors(year, include_pending=True)
+    projected = (
+        projected_all[projected_all["field_code"] == field_code]
+        if not projected_all.empty else projected_all
+    )
+
+    now_ids = set(current["elector_id"].astype("int64")) if not current.empty else set()
+    new_ids = (
+        set(projected["elector_id"].astype("int64")) if not projected.empty else set()
+    )
+    removed = now_ids - new_ids
+    added = new_ids - now_ids
+
+    now_values = {
+        int(row.elector_id): (row.characterization, row.reasoning)
+        for row in current.itertuples(index=False)
+    } if not current.empty else {}
+    modified = {
+        int(row.elector_id)
+        for row in projected.itertuples(index=False)
+        if int(row.elector_id) in now_values
+        and now_values[int(row.elector_id)] != (row.characterization, row.reasoning)
+    } if not projected.empty else set()
+
+    if not (removed or added or modified):
+        st.caption(
+            "Καμία εκκρεμής πρόταση για αυτό το αντικείμενο — "
+            "ο πίνακας παραμένει όπως φαίνεται παραπάνω."
+        )
+        return
+
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Σύνολο", len(projected), delta=len(projected) - len(current))
+    col_b.metric("Προσθήκες", len(added))
+    col_c.metric("Αφαιρέσεις", len(removed))
+    col_d.metric("Μεταβολές", len(modified))
+
+    if removed:
+        st.caption(
+            "Αφαιρούνται: "
+            + ", ".join(_person_label(registry_by_id, i) for i in sorted(removed))
+        )
+
+    view = _decorate(projected, registry_by_id, blocked, pd.DataFrame(), changes)
+    if not view.empty:
+        view.insert(
+            0,
+            "Πρόταση",
+            [
+                "➕ νέος" if int(i) in added else ("🔄 μεταβολή" if int(i) in modified else "")
+                for i in view[ID_COL]
+            ],
+        )
+    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.caption(
+        "Προβολή — τίποτα από αυτά δεν ισχύει μέχρι να τα εγκρίνει ο συντονιστής."
+    )
+
+
 def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
     """Decide every pending proposal of the subject on screen, in one go."""
     here = db.list_proposals(year, field_code=field_code, status=db.PENDING)
@@ -492,6 +555,10 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         )
     with tab_mine:
         _my_proposals(year, user_email, registry_by_id)
+
+    st.divider()
+    st.subheader(f"Ο πίνακας του {year} μετά τις προτεινόμενες αλλαγές")
+    _preview_block(year, field_code, subject, registry_by_id, blocked, changes)
 
     if coordinator:
         st.divider()

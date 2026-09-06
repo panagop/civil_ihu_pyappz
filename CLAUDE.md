@@ -287,6 +287,15 @@ on the same 52 subjects and Streamlit locks nothing. Direct edits would mean
 last-write-wins, silently. Two proposals on the same elector simply coexist and
 the coordinator resolves them.
 
+`working_electors(year, include_pending=True)` replays the undecided proposals
+on top of the accepted ones, projecting what the table would become if
+everything proposed were approved. The tab renders it under "Ο πίνακας του
+<έτους> μετά τις προτεινόμενες αλλαγές", between the proposal forms and the
+coordinator section: removals are gone, additions carry ➕, changed rows 🔄, and
+the person columns come from the current ΑΠΕΛΛΑ export. Accepted proposals are
+replayed before pending ones — they are already reality, so a pending change to
+the same elector should win.
+
 Replay rules (`working_electors`): proposals are applied in decision order, so a
 later accepted one wins; `ΧΑΡΑΚΤΗΡΙΣΜΟΣ`/`ΑΙΤΙΟΛΟΓΗΣΗ` aimed at an elector who
 has since been removed are **no-ops, not errors**. `finalize_year` refuses while

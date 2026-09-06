@@ -1,8 +1,8 @@
 ﻿import warnings
 
 import streamlit as st
-import pandas as pd
-import json
+# import pandas as pd
+# import json
 
 # openpyxl warns on every read of .xlsm files that contain data-validation rules
 # (dropdown lists etc.). We only read these files, so the warning is noise.

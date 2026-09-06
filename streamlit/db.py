@@ -307,11 +307,16 @@ def open_year(year: int, baseline_year: int, opened_by: str) -> str:
     return f"Το έτος {year} άνοιξε με βάση το {baseline_year}."
 
 
-def working_electors(year: int) -> pd.DataFrame:
+def working_electors(year: int, include_pending: bool = False) -> pd.DataFrame:
     """The current state of an open year: baseline + accepted proposals.
 
     Proposals are replayed in the order they were decided, so a later accepted
     proposal wins over an earlier one on the same elector.
+
+    With ``include_pending`` the undecided proposals are replayed on top as
+    well, which projects what the table *would* become if everything currently
+    proposed were approved. Accepted ones still go first: they are already
+    reality, and a pending change to the same elector should win over them.
     """
     state = year_state(year)
     if state is None:
@@ -333,7 +338,13 @@ def working_electors(year: int) -> pd.DataFrame:
         for record in table.itertuples(index=False)
     }
 
-    for change in list_proposals(year, status=ACCEPTED).itertuples(index=False):
+    replay = list_proposals(year, status=ACCEPTED)
+    if include_pending:
+        # list_proposals orders decided rows first (decided_at NULLS LAST), so
+        # concatenating keeps accepted-then-pending without re-sorting.
+        replay = pd.concat([replay, list_proposals(year, status=PENDING)])
+
+    for change in replay.itertuples(index=False):
         key = (int(change.field_code), int(change.elector_id))
         if change.action == ADD:
             rows[key] = {
