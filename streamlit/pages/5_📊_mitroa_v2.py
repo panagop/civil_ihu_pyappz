@@ -199,9 +199,10 @@ def load_external_from_db(year: int) -> dict[str, dict]:
     """Rebuild a stored year in the shape :func:`load_external_workbook` returns.
 
     The database holds only the decisions (χαρακτηρισμός + αιτιολόγηση). The
-    γνωστικό αντικείμενο and its τομέας come from ``antikeimena.csv``; every
-    column describing the person comes from **that year's** registry export, so
-    the table shows the electors as they stood when the list was submitted.
+    γνωστικό αντικείμενο and its επιστημονικό πεδίο come from
+    ``antikeimena.csv``; every column describing the person comes from **that
+    year's** registry export, so the table shows the electors as they stood
+    when the list was submitted.
 
     Electors no longer in that export are kept, with their columns blank —
     dropping them would silently shrink a historical table.
@@ -533,7 +534,7 @@ with tab_antikeimena:
     df_ant = load_antikeimena()
 
     domains = sorted(df_ant["domain"].dropna().unique())
-    selected_domains = st.multiselect("Τομέας", domains)
+    selected_domains = st.multiselect("Επιστημονικό πεδίο", domains)
     query_ant = st.text_input(
         "Αναζήτηση αντικειμένου", placeholder="π.χ. σκυρόδεμα", key="search_antikeimena"
     )
@@ -550,7 +551,7 @@ with tab_antikeimena:
     col_ant_total, col_ant_shown, col_ant_domains = st.columns(3)
     col_ant_total.metric("Σύνολο αντικειμένων", len(df_ant))
     col_ant_shown.metric("Εμφανίζονται", len(filtered_ant))
-    col_ant_domains.metric("Τομείς", filtered_ant["domain"].nunique())
+    col_ant_domains.metric("Επιστημονικά πεδία", filtered_ant["domain"].nunique())
 
     st.dataframe(
         filtered_ant,
@@ -559,7 +560,7 @@ with tab_antikeimena:
         column_config={
             "Code": st.column_config.NumberColumn("Κωδικός", format="%d"),
             "field": st.column_config.TextColumn("Γνωστικό αντικείμενο", width="large"),
-            "domain": st.column_config.TextColumn("Τομέας", width="medium"),
+            "domain": st.column_config.TextColumn("Επιστημονικό πεδίο", width="medium"),
         },
     )
 
@@ -570,7 +571,7 @@ with tab_antikeimena:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    with st.expander("Αντικείμενα ανά τομέα"):
+    with st.expander("Αντικείμενα ανά επιστημονικό πεδίο"):
         st.bar_chart(filtered_ant["domain"].value_counts())
 
 

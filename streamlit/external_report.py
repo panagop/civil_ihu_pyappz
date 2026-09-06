@@ -133,7 +133,8 @@ def build_report(workbook: dict[str, dict], year, source_label: str) -> bytes:
     summary = document.add_table(rows=1, cols=6)
     summary.style = "Table Grid"
     for index, name in enumerate(
-        ["Κωδικός", "Γνωστικό αντικείμενο", "Τομέας", "Ιδίου", "Συναφούς", "Σύνολο"]
+        ["Κωδικός", "Γνωστικό αντικείμενο", "Επιστημονικό πεδίο",
+         "Ιδίου", "Συναφούς", "Σύνολο"]
     ):
         _set_cell(summary.rows[0].cells[index], name, bold=True, size=9)
 
@@ -159,7 +160,7 @@ def build_report(workbook: dict[str, dict], year, source_label: str) -> bytes:
         document.add_heading(f"{entry['code']} — {entry['field']}", level=1)
         if entry["domain"]:
             caption = document.add_paragraph()
-            run = caption.add_run(f"Τομέας: {entry['domain']}")
+            run = caption.add_run(f"Επιστημονικό πεδίο: {entry['domain']}")
             run.italic = True
 
         frame = entry["df"]
