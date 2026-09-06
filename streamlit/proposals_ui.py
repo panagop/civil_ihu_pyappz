@@ -48,6 +48,36 @@ TRACKED_FIELDS = [
     ("Φορέας", "Φορέας"),
 ]
 
+# Ready-made reasons. They are starting points, never a closed list — the text
+# stays editable and "Άλλο" clears it.
+OTHER_REASON = "Άλλο (δική μου αιτιολόγηση)"
+REMOVAL_SUGGESTIONS = [
+    "Δεν συντρέχει πλέον συνάφεια με το γνωστικό αντικείμενο",
+    "Αφυπηρέτηση / αποχώρηση από τον φορέα",
+    "Αντικαθίσταται από εκλέκτορα με μεγαλύτερη συνάφεια",
+]
+ADDITION_SUGGESTIONS = [
+    "Νέα εγγραφή στο μητρώο ΑΠΕΛΛΑ με συναφές γνωστικό αντικείμενο",
+    "Ενίσχυση του μητρώου του γνωστικού αντικειμένου",
+    "Συνάφεια βάσει του δημοσιευμένου ερευνητικού και επιστημονικού έργου",
+]
+
+
+def _suggestion_pick(suggestions: list[str], key: str) -> str:
+    """Offer ready-made reasons and return the chosen one as a starting text.
+
+    A suggestion only *fills* the field — the text stays editable, and
+    "Άλλο" starts it empty. The picker sits outside the form on purpose: a
+    widget inside one does not rerun until submit, so the text below would keep
+    the previously chosen suggestion.
+    """
+    choices = [*suggestions, OTHER_REASON]
+    picked = st.selectbox(
+        "Προτεινόμενη αιτιολόγηση", choices, key=f"{key}_pick",
+        help="Επιλέξτε μία ως αφετηρία ή «Άλλο» για να γράψετε τη δική σας.",
+    )
+    return "" if picked == OTHER_REASON else picked
+
 
 def _person_label(registry_by_id: dict, elector_id: int) -> str:
     person = registry_by_id.get(elector_id)
@@ -173,30 +203,47 @@ def _propose_change(year: int, field_code: int, table: pd.DataFrame,
         format_func=ACTION_LABELS.get, key=f"chg_action_{field_code}",
     )
 
+    characterization = None
+    if action == db.MODIFY:
+        st.caption(
+            "Αλλάξτε τον χαρακτηρισμό, την αιτιολόγηση ή και τα δύο. "
+            "Καταχωρείται ως μία πρόταση, ώστε να εγκριθεί ενιαία."
+        )
+        # Also outside the form: the suggested reasons below depend on it.
+        characterization = st.radio(
+            "Χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True,
+            index=db.CHARACTERIZATIONS.index(current.characterization),
+            key=f"chg_char_{field_code}_{elector}",
+        )
+        suggestions = ["Ενημέρωση της αιτιολόγησης συνάφειας"]
+        if characterization != current.characterization:
+            suggestions.insert(
+                0,
+                f"Μεταβολή χαρακτηρισμού από {current.characterization} "
+                f"σε {characterization}",
+            )
+    else:
+        st.warning(f"Πρόταση αφαίρεσης: **{label}**")
+        suggestions = list(REMOVAL_SUGGESTIONS)
+
+    note_default = _suggestion_pick(
+        suggestions, key=f"chg_{field_code}_{elector}_{action}_{characterization}"
+    )
+
     # The elector is part of every key: Streamlit keeps the stored value of a
     # widget whose key is unchanged, which would defeat the new defaults.
     with st.form(f"change_{field_code}_{elector}_{action}"):
-        characterization, reasoning = None, None
+        reasoning = None
         if action == db.MODIFY:
-            st.caption(
-                "Αλλάξτε τον χαρακτηρισμό, την αιτιολόγηση ή και τα δύο. "
-                "Καταχωρείται ως μία πρόταση, ώστε να εγκριθεί ενιαία."
-            )
-            characterization = st.radio(
-                "Χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True,
-                index=db.CHARACTERIZATIONS.index(current.characterization),
-                key=f"chg_char_{field_code}_{elector}",
-            )
             reasoning = st.text_area(
                 "Αιτιολόγηση συνάφειας", value=current.reasoning, height=140,
                 key=f"chg_reason_{field_code}_{elector}",
             )
-        else:
-            st.warning(f"Πρόταση αφαίρεσης: **{label}**")
 
         note = st.text_area(
-            "Αιτιολόγηση της μεταβολής *", placeholder="Γιατί;",
-            key=f"chg_note_{field_code}_{elector}_{action}",
+            "Αιτιολόγηση της μεταβολής *", value=note_default,
+            placeholder="Γιατί;",
+            key=f"chg_note_{field_code}_{elector}_{action}_{note_default[:40]}",
         )
 
         if st.form_submit_button("Καταχώρηση πρότασης"):
@@ -248,13 +295,27 @@ def _propose_addition(year: int, field_code: int, registry: pd.DataFrame,
         f"{row['Επώνυμο']} {row['Όνομα']} — {row['Βαθμίδα']}, {row['Φορέας']} (#{int(row[ID_COL])})": int(row[ID_COL])
         for _, row in hits.head(25).iterrows()
     }
-    with st.form(f"add_{field_code}"):
-        label = st.selectbox("Υποψήφιος", list(options))
+    # Outside the form so the suggestion below can react to the choice. No key:
+    # the option list changes with the search text, and a stored value that is
+    # no longer in it makes Streamlit raise.
+    label = st.selectbox("Υποψήφιος", list(options))
+    note_default = _suggestion_pick(
+        ADDITION_SUGGESTIONS, key=f"add_{field_code}_{options[label]}"
+    )
+
+    with st.form(f"add_{field_code}_{options[label]}"):
         characterization = st.radio(
             "Χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True
         )
-        reasoning = st.text_area("Αιτιολόγηση συνάφειας *")
-        note = st.text_area("Αιτιολόγηση της μεταβολής *", placeholder="Γιατί προστίθεται;")
+        reasoning = st.text_area(
+            "Αιτιολόγηση συνάφειας *",
+            help="Το κείμενο που εμφανίζεται στον κατατιθέμενο πίνακα.",
+        )
+        note = st.text_area(
+            "Αιτιολόγηση της μεταβολής *", value=note_default,
+            placeholder="Γιατί προστίθεται;",
+            key=f"add_note_{field_code}_{note_default[:40]}",
+        )
         if st.form_submit_button("Πρόταση προσθήκης"):
             if not reasoning.strip():
                 st.error("Η αιτιολόγηση συνάφειας είναι υποχρεωτική.")

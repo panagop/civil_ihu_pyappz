@@ -329,6 +329,13 @@ baseline year, with the before → after in its own column
 `Δυναμική` differs by an accent casefold keeps — that alone was two false
 findings out of 42.
 
+The mandatory «Αιτιολόγηση της μεταβολής» offers ready-made reasons
+(`REMOVAL_SUGGESTIONS`, `ADDITION_SUGGESTIONS`, and one built from the actual
+characterisation change) through `_suggestion_pick`, which only *fills* the box
+— the text stays editable and "Άλλο" clears it. The picker and the
+characterisation radio both sit outside the form for the reason below, and the
+note's key includes the chosen suggestion so a new choice replaces the default.
+
 **The elector selectbox is outside `st.form` on purpose.** A widget inside a
 form does not rerun until submit, so the fields below kept showing the previous
 elector's justification. Widget keys also include the elector id, because
