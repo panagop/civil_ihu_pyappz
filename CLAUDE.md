@@ -425,10 +425,12 @@ yearly export appears in its dropdowns with no code change.
 
 ## Page 5 — μητρώα v2
 
-Tabs: **Σύνολο εκλεκτόρων** (browse an annual export) · **Γνωστικά αντικείμενα**
-(the 52 subjects) · **Εξωτερικοί εκλέκτορες ανά αντικείμενο** (one subject at a
-time, from **either** the submitted workbook **or** the database — a radio picks
-the source; the database option appears only where there are stored years) · **Έλεγχος εγκυρότητας** (cross-check a
+Tabs: **Εκλέκτορες ΑΠΕΛΛΑ** (browse an annual export) · **Γνωστικά αντικείμενα
+ΔΙΠΑΕ** (the 52 subjects) · **Εξωτερικοί εκλέκτορες ΔΙΠΑΕ** (one subject at a
+time, from **either** the database **or** the submitted workbook — a radio picks
+the source, defaulting to the database, which is where a year lives from 2026
+on; the file option is the historical archive, and the database option appears
+only where there are stored years) · **Έλεγχος εγκυρότητας** (cross-check a
 submitted year against a registry export) · **Αναζήτηση με λέξεις-κλειδιά**
 (find candidates by γνωστικό αντικείμενο, OR/AND, flag those new since a chosen
 year) · **Προετοιμασία <έτους>** (propose, decide and finalise the year being

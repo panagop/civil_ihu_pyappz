@@ -417,9 +417,9 @@ st.markdown("## Μητρώα γνωστικών αντικειμένων (v2)")
     tab_proposals,
 ) = st.tabs(
     [
-        "Σύνολο εκλεκτόρων",
-        "Γνωστικά αντικείμενα",
-        "Εξωτερικοί εκλέκτορες ανά αντικείμενο",
+        "Εκλέκτορες ΑΠΕΛΛΑ",
+        "Γνωστικά αντικείμενα ΔΙΠΑΕ",
+        "Εξωτερικοί εκλέκτορες ΔΙΠΑΕ",
         "Έλεγχος εγκυρότητας",
         "Αναζήτηση με λέξεις-κλειδιά",
         f"Προετοιμασία {WORKING_YEAR}",
@@ -538,9 +538,11 @@ with tab_external:
     external_files = list_external_files()
     db_years = db.stored_years()
 
-    sources = [SOURCE_FILE] if external_files else []
-    if db_years:
-        sources.append(SOURCE_DB)
+    # Database first, so it is the default: from 2026 on it is where the year
+    # lives, and the workbooks are only the historical record.
+    sources = [SOURCE_DB] if db_years else []
+    if external_files:
+        sources.append(SOURCE_FILE)
 
     if not sources:
         st.warning(
@@ -660,10 +662,12 @@ with tab_check:
     else:
         col_a, col_b = st.columns(2)
         check_year = col_a.selectbox(
-            "Πίνακες έτους", list(external_files), key="check_external_year"
+            "Εγκεκριμένο μητρώο ΔΙΠΑΕ", list(external_files),
+            key="check_external_year",
         )
         registry_label = col_b.selectbox(
-            "Έλεγχος έναντι μητρώου", list(registry_files), key="check_registry_year"
+            "Έλεγχος έναντι μητρώου ΑΠΕΛΛΑ", list(registry_files),
+            key="check_registry_year",
         )
         external_path = external_files[check_year]
         registry_path = registry_files[registry_label]
