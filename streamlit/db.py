@@ -103,6 +103,12 @@ WITHDRAWN = "ΑΠΟΣΥΡΘΗΚΕ"
 OPEN = "ΑΝΟΙΧΤΟ"
 LOCKED = "ΚΛΕΙΔΩΜΕΝΟ"
 
+# Electors who lost their eligibility in the ΑΠΕΛΛΑ registry leave the table on
+# their own: it is not a judgement anyone makes, so it is not a proposal. The
+# reason still appears in the report's table of changes.
+AUTO_STATUS = "ΑΥΤΟΜΑΤΗ"
+AUTO_REMOVAL_NOTE = "Διαγραφή λόγω μη επιλεξιμότητας στο μητρώο του ΑΠΕΛΛΑ"
+
 ADD = "ΠΡΟΣΘΗΚΗ"
 REMOVE = "ΑΦΑΙΡΕΣΗ"
 MODIFY = "ΜΕΤΑΒΟΛΗ"
@@ -307,7 +313,9 @@ def open_year(year: int, baseline_year: int, opened_by: str) -> str:
     return f"Το έτος {year} άνοιξε με βάση το {baseline_year}."
 
 
-def working_electors(year: int, include_pending: bool = False) -> pd.DataFrame:
+def working_electors(
+    year: int, include_pending: bool = False, blocked_ids: set[int] | None = None
+) -> pd.DataFrame:
     """The current state of an open year: baseline + accepted proposals.
 
     Proposals are replayed in the order they were decided, so a later accepted
@@ -317,6 +325,10 @@ def working_electors(year: int, include_pending: bool = False) -> pd.DataFrame:
     well, which projects what the table *would* become if everything currently
     proposed were approved. Accepted ones still go first: they are already
     reality, and a pending change to the same elector should win over them.
+
+    ``blocked_ids`` are dropped at the end, unconditionally: an elector who is
+    no longer eligible in the ΑΠΕΛΛΑ registry cannot be in the table, so this
+    is filtered at the source rather than left to each caller to remember.
     """
     state = year_state(year)
     if state is None:
@@ -369,10 +381,33 @@ def working_electors(year: int, include_pending: bool = False) -> pd.DataFrame:
             columns=["year", "field_code", "elector_id", "characterization", "reasoning"]
         )
     result = pd.DataFrame(list(rows.values()))
+    if blocked_ids:
+        result = result[~result["elector_id"].astype("int64").isin(blocked_ids)]
+        if result.empty:
+            return pd.DataFrame(
+                columns=["year", "field_code", "elector_id", "characterization",
+                         "reasoning"]
+            )
     return result.sort_values(
         ["field_code", "characterization", "elector_id"],
         key=lambda col: col.ne("ΙΔΙΟΥ") if col.name == "characterization" else col,
     ).reset_index(drop=True)
+
+
+def auto_removals(
+    year: int, blocked_ids: set[int], include_pending: bool = False
+) -> pd.DataFrame:
+    """The rows :func:`working_electors` drops for lost eligibility.
+
+    Needed because the removal leaves no proposal behind, and the report still
+    has to say who left and why.
+    """
+    if not blocked_ids:
+        return pd.DataFrame()
+    table = working_electors(year, include_pending=include_pending)
+    if table.empty:
+        return table
+    return table[table["elector_id"].astype("int64").isin(blocked_ids)]
 
 
 def finalize_year(
@@ -380,10 +415,8 @@ def finalize_year(
 ) -> str:
     """Write the computed table into external_electors and freeze the year.
 
-    ``blocked_ids`` are the electors carrying a κώλυμα in the current registry.
-    They are refused outright: a locked year is the submitted document, and an
-    excluded elector must not reach it — the UI check alone is not enough,
-    because this is the one write that cannot be undone.
+    ``blocked_ids`` never reach the stored table: they are filtered out of what
+    gets written, the same way they are filtered out of every view.
     """
     engine = get_engine()
     if engine is None:
@@ -400,18 +433,9 @@ def finalize_year(
             f"Εκκρεμούν {len(pending)} προτάσεις — αποφασίστε τις πρώτα."
         )
 
-    table = working_electors(year)
+    table = working_electors(year, blocked_ids=blocked_ids)
     if table.empty:
         return "Ο πίνακας είναι κενός — δεν κλειδώνεται."
-
-    if blocked_ids:
-        still = table[table["elector_id"].astype("int64").isin(blocked_ids)]
-        if not still.empty:
-            people = still["elector_id"].nunique()
-            return (
-                f"Ο πίνακας περιέχει ακόμη {people} εκλέκτορες με κώλυμα "
-                f"({len(still)} εγγραφές). Αφαιρέστε τους πρώτα."
-            )
 
     records = table.to_dict("records")
     with engine.begin() as conn:

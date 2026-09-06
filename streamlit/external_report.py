@@ -57,6 +57,10 @@ CHANGE_COLUMNS = {
     "Κατάσταση": 2.2,
 }
 CHANGE_FONT_PT = 8.0
+REASON_COLUMN = "Αιτιολόγηση μεταβολής"
+PENDING_STATUS = "ΕΚΚΡΕΜΕΙ"
+# Width the reason column reclaims when Κατάσταση is dropped
+SPARE_WIDTH_CM = CHANGE_COLUMNS["Κατάσταση"]
 
 DRAFT_NOTICE = (
     "ΠΡΟΧΕΙΡΟ — περιλαμβάνει προτάσεις που δεν έχουν εγκριθεί ακόμη"
@@ -125,12 +129,23 @@ def _counts(frame) -> tuple[int, int]:
 
 
 def _add_change_table(document: Document, entries: list[dict]) -> None:
-    """The proposed additions, removals and changes for one subject."""
+    """The additions, removals and changes for one subject.
+
+    The Κατάσταση column is dropped when nothing is still pending: with every
+    change settled it would say the same thing on every row, and the space is
+    better spent on the reason.
+    """
     columns = list(CHANGE_COLUMNS)
+    if not any(entry.get("status") == PENDING_STATUS for entry in entries):
+        columns.remove("Κατάσταση")
     table = document.add_table(rows=1, cols=len(columns))
     table.style = "Table Grid"
     table.autofit = False
-    widths = [Cm(CHANGE_COLUMNS[name]) for name in columns]
+    # Give the freed width to the reason, which is the column that needs it
+    widths = [
+        Cm(CHANGE_COLUMNS[name] + (SPARE_WIDTH_CM if name == REASON_COLUMN else 0))
+        for name in columns
+    ]
 
     for index, name in enumerate(columns):
         cell = table.rows[0].cells[index]
@@ -138,13 +153,15 @@ def _add_change_table(document: Document, entries: list[dict]) -> None:
         _set_cell(cell, name, bold=True, size=CHANGE_FONT_PT)
     table.rows[0]._tr.get_or_add_trPr().append(_repeat_header_element())
 
+    keys = {
+        "Ενέργεια": "action", "Εκλέκτορας": "person", "Μεταβολή": "detail",
+        REASON_COLUMN: "note", "Κατάσταση": "status",
+    }
     for entry in entries:
         cells = table.add_row().cells
-        for index, key in enumerate(
-            ["action", "person", "detail", "note", "status"]
-        ):
+        for index, name in enumerate(columns):
             cells[index].width = widths[index]
-            _set_cell(cells[index], entry.get(key, ""), size=CHANGE_FONT_PT)
+            _set_cell(cells[index], entry.get(keys[name], ""), size=CHANGE_FONT_PT)
 
 
 def build_report(
@@ -221,18 +238,19 @@ def build_report(
             run = caption.add_run(f"Επιστημονικό πεδίο: {entry['domain']}")
             run.italic = True
 
+        # Changes first: the reader wants to know what moved before reading
+        # the list it produced.
+        subject_changes = (changes or {}).get(str(entry["code"]), [])
+        if subject_changes:
+            document.add_heading(f"Μεταβολές ({len(subject_changes)})", level=2)
+            _add_change_table(document, subject_changes)
+            document.add_paragraph()
+            document.add_heading("Πίνακας εκλεκτόρων", level=2)
+
         frame = entry["df"]
         columns = [name for name in COLUMN_WIDTHS if name in frame.columns]
         columns += [name for name in frame.columns if name not in COLUMN_WIDTHS]
         _add_table(document, frame, columns)
-
-        subject_changes = (changes or {}).get(str(entry["code"]), [])
-        if subject_changes:
-            document.add_paragraph()
-            document.add_heading(
-                f"Μεταβολές ({len(subject_changes)})", level=2
-            )
-            _add_change_table(document, subject_changes)
 
     buffer = io.BytesIO()
     document.save(buffer)

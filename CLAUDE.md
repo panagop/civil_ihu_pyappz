@@ -335,17 +335,15 @@ elector's justification. Widget keys also include the elector id, because
 Streamlit keeps the stored value of a key that has not changed and would
 override the new defaults.
 
-**Electors with a κώλυμα are not dropped automatically.** A κώλυμα is a fact,
-but removing somebody from a submitted list is a decision whose reason has to
-survive on the record — so `db.propose_removals` files ordinary `ΑΦΑΙΡΕΣΗ`
-proposals in bulk (skipping any that already exist), offered both per subject
-and for the whole year. Three things keep this from being forgotten, which it
-was between 2026-09-05 and 2026-09-06: the 🔴 warning above each subject's
-table, an error on the projected table if any remain, and
-`db.finalize_year(..., blocked_ids=...)`, which **refuses to lock the year**
-while one is still in it. The UI check alone is not enough — locking is the one
-write that cannot be undone. For 2026 this is 34 people across 58 rows in 32
-subjects.
+**Losing eligibility in the ΑΠΕΛΛΑ registry removes an elector automatically.**
+It is not a judgement anyone makes, so it is not a proposal: `working_electors`
+takes `blocked_ids` and drops them at the source, so no view and no write can
+forget. `finalize_year` passes the same set, so a locked year cannot contain
+one. `db.auto_removals` reconstructs who left, since there is no proposal row to
+look at, and the report prints them with `AUTO_REMOVAL_NOTE` ("Διαγραφή λόγω μη
+επιλεξιμότητας στο μητρώο του ΑΠΕΛΛΑ") and status `ΑΥΤΟΜΑΤΗ`. For 2026 that is
+58 rows / 34 people across 32 subjects. Members still propose *other* removals
+themselves, with their own justification.
 
 Roles are two, and there is deliberately **no users table**: a coordinator is an
 email listed in the `coordinator_emails` setting (same mechanism as
@@ -362,10 +360,13 @@ each. It takes the same parsed structure either source produces, so the button
 works identically for file and database. ~9 s for 1.476 rows, so it sits behind
 a button and a spinner rather than being built on load.
 
-`build_report(..., changes=..., draft=...)` adds, under each subject, a short
-table of the additions, removals and changes with the reason for each — only
-who / what / why, since the electors' full details are in the table above it.
-Rejected and withdrawn proposals are left out. `draft=True` stamps
+`build_report(..., changes=..., draft=...)` puts, **before** each subject's
+table, a short table of the additions, removals and changes with the reason for
+each — what moved reads first, the list it produced second — and only
+who / what / why, since the electors' full details follow underneath. The
+`Κατάσταση` column disappears when nothing is `ΕΚΚΡΕΜΕΙ` (it would repeat the
+same value on every row), and its width goes to the reason. Rejected and
+withdrawn proposals are left out. `draft=True` stamps
 "ΠΡΟΧΕΙΡΟ — περιλαμβάνει προτάσεις που δεν έχουν εγκριθεί ακόμη" under the
 title, so a report of a year still in preparation cannot be mistaken for the
 final one; the "Προετοιμασία <έτους>" tab generates exactly this from the

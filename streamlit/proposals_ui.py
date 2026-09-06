@@ -311,12 +311,15 @@ def _to_excel(frame: pd.DataFrame) -> bytes:
 def _preview_block(year: int, field_code: int, current: pd.DataFrame,
                    registry_by_id: dict, people: pd.DataFrame, fold,
                    marks: bool, blocked: set[int]) -> None:
+    """Blocked electors are already gone from both sides of this comparison."""
     """The table as it would stand if every pending proposal were approved.
 
     Shaped by external_table, so it has the submitted layout — the same columns
     the browse tab shows and the Word report prints.
     """
-    projected_all = db.working_electors(year, include_pending=True)
+    projected_all = db.working_electors(
+        year, include_pending=True, blocked_ids=blocked
+    )
     projected = (
         projected_all[projected_all["field_code"] == field_code]
         if not projected_all.empty else projected_all
@@ -352,17 +355,6 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
             + ", ".join(_person_label(registry_by_id, i) for i in sorted(removed))
         )
 
-    still_blocked = (
-        {int(i) for i in projected["elector_id"]} & blocked
-        if not projected.empty else set()
-    )
-    if still_blocked:
-        st.error(
-            f"{BLOCKED_MARK} Ο πίνακας περιέχει ακόμη {len(still_blocked)} "
-            "εκλέκτορες με κώλυμα. Δεν μπορεί να κατατεθεί έτσι — προτείνετε "
-            "την αφαίρεσή τους από την προειδοποίηση πάνω από τον πίνακα."
-        )
-
     # Built by external_table, exactly as the browse tab and the Word report
     # build it — this is the table that gets submitted, not a review view.
     view = external_table.build(projected, people, fold)
@@ -394,19 +386,32 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
 
 
 def _change_entries(
-    year: int, registry_by_id: dict
+    year: int, registry_by_id: dict, auto_removed: pd.DataFrame
 ) -> dict[str, list[dict]]:
     """Per subject code, the accepted and pending changes with their reasons.
 
     Rejected and withdrawn proposals are left out: the department is being
     shown what moved, not what was considered.
     """
+    entries: dict[str, list[dict]] = {}
+
+    # Lost eligibility leaves no proposal behind, so it is reconstructed here
+    for row in auto_removed.itertuples(index=False):
+        entries.setdefault(str(int(row.field_code)), []).append(
+            {
+                "action": db.REMOVE,
+                "person": _person_label(registry_by_id, int(row.elector_id)),
+                "detail": "Αφαιρείται",
+                "note": db.AUTO_REMOVAL_NOTE,
+                "status": db.AUTO_STATUS,
+            }
+        )
+
     proposals = db.list_proposals(year)
     if proposals.empty:
-        return {}
+        return entries
     proposals = proposals[proposals["status"].isin([db.ACCEPTED, db.PENDING])]
 
-    entries: dict[str, list[dict]] = {}
     for row in proposals.itertuples(index=False):
         if row.action == db.ADD:
             detail = f"Προστίθεται ως {row.characterization}"
@@ -428,7 +433,7 @@ def _change_entries(
 
 def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFrame,
                   people: pd.DataFrame, fold, registry_by_id: dict,
-                  locked: bool) -> None:
+                  locked: bool, auto_removed: pd.DataFrame) -> None:
     """Generate the consolidated Word report for the year as it now stands."""
     st.caption(
         "Ο ίδιος πίνακας που κατατίθεται, για όλα τα αντικείμενα, με έναν "
@@ -455,7 +460,7 @@ def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFr
                     workbook,
                     year,
                     "βάση δεδομένων",
-                    changes=_change_entries(year, registry_by_id),
+                    changes=_change_entries(year, registry_by_id, auto_removed),
                     draft=not locked,
                 ),
                 f"ekloktores_{year}{'' if locked else '_προχειρο'}.docx",
@@ -474,42 +479,6 @@ def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFr
             key="prep_report_dl",
             type="primary",
         )
-
-
-def _remove_blocked_block(year: int, table: pd.DataFrame, blocked: set[int],
-                          registry_by_id: dict, user_email: str, *,
-                          scope: str, key: str) -> None:
-    """Propose removing every elector carrying a κώλυμα in `table`.
-
-    Not automatic. A κώλυμα is a fact, but taking somebody out of a submitted
-    list is a decision, and the reason has to survive on the record — so this
-    files ordinary proposals, in bulk, with a standard note.
-    """
-    if table.empty:
-        return
-    targets = [
-        (int(row.field_code), int(row.elector_id))
-        for row in table.itertuples(index=False)
-        if int(row.elector_id) in blocked
-    ]
-    if not targets:
-        return
-
-    people = len({elector for _, elector in targets})
-    note = st.text_input(
-        "Αιτιολόγηση αφαίρεσης",
-        value="Κώλυμα αποκλεισμού από τα μητρώα στο μητρώο ΑΠΕΛΛΑ.",
-        key=f"{key}_note",
-    )
-    if st.button(
-        f"Πρόταση αφαίρεσης {len(targets)} εγγραφών ({people} ατόμων) {scope}",
-        key=f"{key}_go",
-    ):
-        st.success(db.propose_removals(year, targets, note, user_email))
-        st.rerun()
-    with st.expander(f"Ποιοι είναι ({people})"):
-        for elector in sorted({e for _, e in targets}):
-            st.write(f"- {_person_label(registry_by_id, elector)}")
 
 
 def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
@@ -549,7 +518,7 @@ def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -
 
 def _coordinator_block(year: int, field_code: int, field_label: str,
                        registry_by_id: dict, user_email: str,
-                       whole_year: pd.DataFrame, blocked: set[int]) -> None:
+                       blocked: set[int]) -> None:
     pending = db.list_proposals(year, status=db.PENDING)
     st.metric("Εκκρεμείς προτάσεις (όλο το έτος)", len(pending))
 
@@ -564,12 +533,6 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
                 ),
                 use_container_width=True, hide_index=True,
             )
-
-    st.markdown("##### Εκλέκτορες με κώλυμα σε όλο το έτος")
-    _remove_blocked_block(
-        year, whole_year, blocked, registry_by_id, user_email,
-        scope="σε όλα τα αντικείμενα", key="blk_all",
-    )
 
     st.markdown("##### Μαζική απόφαση για το τρέχον αντικείμενο")
     _bulk_block(year, field_code, field_label, user_email)
@@ -654,7 +617,10 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     blocked = _blocked_ids(registry, blocking_cols)
     changes = registry_changes(baseline_registry, registry, fold)
 
-    table = db.working_electors(year)
+    # Filtered at the source: an elector who lost eligibility is out of every
+    # view, and out of what finalisation writes.
+    table = db.working_electors(year, blocked_ids=blocked)
+    auto_removed = db.auto_removals(year, blocked)
     labels = {
         f"{row.Code} — {row.field}": int(row.Code)
         for row in antikeimena.sort_values("Code").itertuples(index=False)
@@ -670,21 +636,22 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     col_a.metric("Σύνολο", len(subject))
     col_b.metric("Ιδίου", int(counts.get("ΙΔΙΟΥ", 0)) if len(counts) else 0)
     col_c.metric("Συναφούς", int(counts.get("ΣΥΝΑΦΟΥΣ", 0)) if len(counts) else 0)
-    blocked_here = (
-        int(subject["elector_id"].astype("int64").isin(blocked).sum())
-        if not subject.empty else 0
+    removed_here = (
+        auto_removed[auto_removed["field_code"] == field_code]
+        if not auto_removed.empty else auto_removed
     )
-    col_d.metric("Με κώλυμα", blocked_here)
+    col_d.metric("Αφαιρέθηκαν αυτόματα", len(removed_here))
 
-    if blocked_here:
+    if len(removed_here):
         st.warning(
-            f"{BLOCKED_MARK} {blocked_here} εκλέκτορες έχουν κώλυμα αποκλεισμού "
-            "από τα μητρώα και πρέπει να αφαιρεθούν ή να τεκμηριωθεί η παραμονή τους."
+            f"{BLOCKED_MARK} {len(removed_here)} εκλέκτορες αφαιρέθηκαν "
+            "αυτόματα — δεν είναι πλέον επιλέξιμοι στο μητρώο ΑΠΕΛΛΑ. "
+            "Δεν χρειάζεται καμία ενέργεια· η αιτιολόγηση μπαίνει μόνη της "
+            "στον πίνακα μεταβολών."
         )
-        _remove_blocked_block(
-            year, subject, blocked, registry_by_id, user_email,
-            scope=f"στο «{label}»", key=f"blk_{field_code}",
-        )
+        with st.expander("Ποιοι αφαιρέθηκαν"):
+            for elector in removed_here["elector_id"]:
+                st.write(f"- {_person_label(registry_by_id, int(elector))}")
     changed_here = (
         int(subject["elector_id"].astype("int64").isin(changes).sum())
         if not subject.empty else 0
@@ -738,13 +705,14 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     st.subheader("Συγκεντρωτική αναφορά Word")
     _report_block(
         year,
-        db.working_electors(year, include_pending=True),
+        db.working_electors(year, include_pending=True, blocked_ids=blocked),
         antikeimena, people, fold, registry_by_id, locked,
+        db.auto_removals(year, blocked, include_pending=True),
     )
 
     if coordinator:
         st.divider()
         st.subheader("Συντονιστής")
         _coordinator_block(
-            year, field_code, label, registry_by_id, user_email, table, blocked
+            year, field_code, label, registry_by_id, user_email, blocked
         )
