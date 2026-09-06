@@ -346,7 +346,13 @@ override the new defaults.
 It is not a judgement anyone makes, so it is not a proposal: `working_electors`
 takes `blocked_ids` and drops them at the source, so no view and no write can
 forget. `finalize_year` passes the same set, so a locked year cannot contain
-one. `db.auto_removals` reconstructs who left, since there is no proposal row to
+one. The tab keeps **two views** of the year: the filtered one drives the preview,
+the report and finalisation, while the overview table renders the *unfiltered*
+one so the removed electors stay visible in place with 🔴 (a caption says they
+are not in the totals and do not reach the submitted table). Seeing who dropped
+out, in position, is what makes the table readable at a glance — hiding them
+was a regression on 2026-09-06.
+`db.auto_removals` reconstructs who left, since there is no proposal row to
 look at, and the report prints them with `AUTO_REMOVAL_NOTE` ("Διαγραφή λόγω μη
 επιλεξιμότητας στο μητρώο του ΑΠΕΛΛΑ") and status `ΑΥΤΟΜΑΤΗ`. For 2026 that is
 58 rows / 34 people across 32 subjects. Members still propose *other* removals

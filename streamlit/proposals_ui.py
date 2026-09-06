@@ -718,9 +718,14 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     blocked = _blocked_ids(registry, blocking_cols)
     changes = registry_changes(baseline_registry, registry, fold)
 
-    # Filtered at the source: an elector who lost eligibility is out of every
-    # view, and out of what finalisation writes.
+    # Two views of the same year, on purpose. `table` is what the 2026 μητρώο
+    # actually is — electors who lost eligibility are filtered at the source, so
+    # they cannot slip into the preview, the report or what finalisation writes.
+    # `table_all` keeps them, only so the overview below can still show them
+    # marked 🔴: seeing who dropped out, in place, is what makes the table
+    # readable at a glance.
     table = db.working_electors(year, blocked_ids=blocked)
+    table_all = db.working_electors(year)
     auto_removed = db.auto_removals(year, blocked)
     labels = {
         f"{row.Code} — {row.field}": int(row.Code)
@@ -730,6 +735,10 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     field_code = labels[label]
 
     subject = table[table["field_code"] == field_code] if not table.empty else table
+    subject_all = (
+        table_all[table_all["field_code"] == field_code]
+        if not table_all.empty else table_all
+    )
     pending = db.list_proposals(year, field_code=field_code, status=db.PENDING)
 
     counts = subject["characterization"].value_counts() if not subject.empty else {}
@@ -765,9 +774,15 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         )
 
     st.dataframe(
-        _decorate(subject, registry_by_id, blocked, pending, changes),
+        _decorate(subject_all, registry_by_id, blocked, pending, changes),
         use_container_width=True, hide_index=True,
     )
+    if len(removed_here):
+        st.caption(
+            f"{BLOCKED_MARK} = αφαιρείται αυτόματα. Οι γραμμές παραμένουν εδώ "
+            "για εποπτεία και **δεν** προσμετρώνται στα σύνολα παραπάνω ούτε "
+            "περνούν στον πίνακα που κατατίθεται."
+        )
 
     if locked:
         return
