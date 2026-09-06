@@ -296,7 +296,12 @@ The tab lives in [streamlit/proposals_ui.py](streamlit/proposals_ui.py) — the
 only part of the app that writes anything. Per-subject it shows the computed
 table (🔴 on anyone with a κώλυμα in the current registry, and ➕➖🔄✏️ for
 pending proposals), then sub-tabs for Μεταβολή / Προσθήκη / Οι προτάσεις μου,
-and a coordinator-only section to decide proposals and lock the year. Actions
+and a coordinator-only section to decide proposals and lock the year. The
+coordinator can decide the current subject's pending proposals **in bulk**
+(`db.decide_field_proposals` — one UPDATE, so a subject is decided whole or not
+at all; a half-applied batch is hard to reason about when one elector has
+several proposals), behind a confirmation checkbox, with
+`db.pending_by_field` showing where the remaining work is. Actions
 sit in a form under the table rather than as buttons on each row: ~26 electors
 × 3 buttons would rebuild ~80 widgets per rerun for a worse layout.
 

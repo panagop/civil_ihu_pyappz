@@ -521,6 +521,65 @@ def decide_proposal(
     return f"Η πρόταση {proposal_id}: {status.lower()}."
 
 
+def decide_field_proposals(
+    year: int, field_code: int, status: str, decided_by: str,
+    decision_note: str | None = None,
+) -> str:
+    """Decide every pending proposal of one γνωστικό αντικείμενο at once.
+
+    One statement rather than a loop, so a coordinator either decides the whole
+    subject or none of it — a half-applied batch would be hard to reason about
+    when the same elector has several proposals.
+    """
+    engine = get_engine()
+    if engine is None:
+        return "Δεν υπάρχει βάση δεδομένων."
+    state = year_state(year)
+    if state is None or state["status"] == LOCKED:
+        return f"Το έτος {year} δεν είναι ανοιχτό."
+    with engine.begin() as conn:
+        decided = conn.execute(
+            text(
+                """
+                UPDATE proposals
+                   SET status = :status, decided_by = :by, decided_at = now(),
+                       decision_note = :decision_note
+                 WHERE year = :year AND field_code = :field_code
+                       AND status = :pending
+                """
+            ),
+            {
+                "status": status,
+                "by": decided_by,
+                "decision_note": decision_note,
+                "year": year,
+                "field_code": field_code,
+                "pending": PENDING,
+            },
+        ).rowcount
+    if not decided:
+        return "Δεν υπήρχαν εκκρεμείς προτάσεις σε αυτό το αντικείμενο."
+    return f"{decided} προτάσεις: {status.lower()}."
+
+
+def pending_by_field(year: int) -> pd.DataFrame:
+    """How many proposals await a decision, per γνωστικό αντικείμενο."""
+    engine = get_engine()
+    if engine is None:
+        return pd.DataFrame()
+    query = text(
+        """
+        SELECT field_code, COUNT(*) AS pending
+        FROM proposals
+        WHERE year = :year AND status = :pending
+        GROUP BY field_code
+        ORDER BY field_code
+        """
+    )
+    with engine.connect() as conn:
+        return pd.read_sql(query, conn, params={"year": year, "pending": PENDING})
+
+
 def withdraw_proposal(proposal_id: int, author: str) -> str:
     """Withdraw your own pending proposal."""
     engine = get_engine()

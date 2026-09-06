@@ -298,9 +298,61 @@ def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
             st.rerun()
 
 
-def _coordinator_block(year: int, registry_by_id: dict, user_email: str) -> None:
+def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
+    """Decide every pending proposal of the subject on screen, in one go."""
+    here = db.list_proposals(year, field_code=field_code, status=db.PENDING)
+    if here.empty:
+        st.caption("Καμία εκκρεμής πρόταση σε αυτό το αντικείμενο.")
+        return
+
+    counts = here["action"].value_counts().to_dict()
+    st.write(
+        f"**{len(here)} εκκρεμείς** στο «{field_label}» — "
+        + ", ".join(f"{count} × {action}" for action, count in counts.items())
+    )
+    note = st.text_input(
+        "Σχόλιο απόφασης (προαιρετικό)", key=f"bulk_note_{field_code}"
+    )
+    confirmed = st.checkbox(
+        f"Επιβεβαιώνω τη μαζική απόφαση για {len(here)} προτάσεις",
+        key=f"bulk_ok_{field_code}",
+    )
+    accept, reject = st.columns(2)
+    if accept.button(
+        "Έγκριση όλων", type="primary", disabled=not confirmed,
+        key=f"bulk_yes_{field_code}",
+    ):
+        st.success(db.decide_field_proposals(
+            year, field_code, db.ACCEPTED, user_email, note))
+        st.rerun()
+    if reject.button(
+        "Απόρριψη όλων", disabled=not confirmed, key=f"bulk_no_{field_code}"
+    ):
+        st.warning(db.decide_field_proposals(
+            year, field_code, db.REJECTED, user_email, note))
+        st.rerun()
+
+
+def _coordinator_block(year: int, field_code: int, field_label: str,
+                       registry_by_id: dict, user_email: str) -> None:
     pending = db.list_proposals(year, status=db.PENDING)
-    st.metric("Εκκρεμείς προτάσεις", len(pending))
+    st.metric("Εκκρεμείς προτάσεις (όλο το έτος)", len(pending))
+
+    per_field = db.pending_by_field(year)
+    if not per_field.empty:
+        with st.expander(
+            f"Εκκρεμότητες ανά αντικείμενο ({len(per_field)} αντικείμενα)"
+        ):
+            st.dataframe(
+                per_field.rename(
+                    columns={"field_code": "Κωδικός", "pending": "Εκκρεμείς"}
+                ),
+                use_container_width=True, hide_index=True,
+            )
+
+    st.markdown("##### Μαζική απόφαση για το τρέχον αντικείμενο")
+    _bulk_block(year, field_code, field_label, user_email)
+    st.markdown("##### Απόφαση ανά πρόταση")
 
     if not pending.empty:
         view = pending.assign(
@@ -444,4 +496,4 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     if coordinator:
         st.divider()
         st.subheader("Συντονιστής")
-        _coordinator_block(year, registry_by_id, user_email)
+        _coordinator_block(year, field_code, label, registry_by_id, user_email)
