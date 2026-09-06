@@ -310,7 +310,7 @@ def _to_excel(frame: pd.DataFrame) -> bytes:
 
 def _preview_block(year: int, field_code: int, current: pd.DataFrame,
                    registry_by_id: dict, people: pd.DataFrame, fold,
-                   marks: bool) -> None:
+                   marks: bool, blocked: set[int]) -> None:
     """The table as it would stand if every pending proposal were approved.
 
     Shaped by external_table, so it has the submitted layout — the same columns
@@ -350,6 +350,17 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
         st.caption(
             "Αφαιρούνται: "
             + ", ".join(_person_label(registry_by_id, i) for i in sorted(removed))
+        )
+
+    still_blocked = (
+        {int(i) for i in projected["elector_id"]} & blocked
+        if not projected.empty else set()
+    )
+    if still_blocked:
+        st.error(
+            f"{BLOCKED_MARK} Ο πίνακας περιέχει ακόμη {len(still_blocked)} "
+            "εκλέκτορες με κώλυμα. Δεν μπορεί να κατατεθεί έτσι — προτείνετε "
+            "την αφαίρεσή τους από την προειδοποίηση πάνω από τον πίνακα."
         )
 
     # Built by external_table, exactly as the browse tab and the Word report
@@ -465,6 +476,42 @@ def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFr
         )
 
 
+def _remove_blocked_block(year: int, table: pd.DataFrame, blocked: set[int],
+                          registry_by_id: dict, user_email: str, *,
+                          scope: str, key: str) -> None:
+    """Propose removing every elector carrying a κώλυμα in `table`.
+
+    Not automatic. A κώλυμα is a fact, but taking somebody out of a submitted
+    list is a decision, and the reason has to survive on the record — so this
+    files ordinary proposals, in bulk, with a standard note.
+    """
+    if table.empty:
+        return
+    targets = [
+        (int(row.field_code), int(row.elector_id))
+        for row in table.itertuples(index=False)
+        if int(row.elector_id) in blocked
+    ]
+    if not targets:
+        return
+
+    people = len({elector for _, elector in targets})
+    note = st.text_input(
+        "Αιτιολόγηση αφαίρεσης",
+        value="Κώλυμα αποκλεισμού από τα μητρώα στο μητρώο ΑΠΕΛΛΑ.",
+        key=f"{key}_note",
+    )
+    if st.button(
+        f"Πρόταση αφαίρεσης {len(targets)} εγγραφών ({people} ατόμων) {scope}",
+        key=f"{key}_go",
+    ):
+        st.success(db.propose_removals(year, targets, note, user_email))
+        st.rerun()
+    with st.expander(f"Ποιοι είναι ({people})"):
+        for elector in sorted({e for _, e in targets}):
+            st.write(f"- {_person_label(registry_by_id, elector)}")
+
+
 def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
     """Decide every pending proposal of the subject on screen, in one go."""
     here = db.list_proposals(year, field_code=field_code, status=db.PENDING)
@@ -501,7 +548,8 @@ def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -
 
 
 def _coordinator_block(year: int, field_code: int, field_label: str,
-                       registry_by_id: dict, user_email: str) -> None:
+                       registry_by_id: dict, user_email: str,
+                       whole_year: pd.DataFrame, blocked: set[int]) -> None:
     pending = db.list_proposals(year, status=db.PENDING)
     st.metric("Εκκρεμείς προτάσεις (όλο το έτος)", len(pending))
 
@@ -516,6 +564,12 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
                 ),
                 use_container_width=True, hide_index=True,
             )
+
+    st.markdown("##### Εκλέκτορες με κώλυμα σε όλο το έτος")
+    _remove_blocked_block(
+        year, whole_year, blocked, registry_by_id, user_email,
+        scope="σε όλα τα αντικείμενα", key="blk_all",
+    )
 
     st.markdown("##### Μαζική απόφαση για το τρέχον αντικείμενο")
     _bulk_block(year, field_code, field_label, user_email)
@@ -553,11 +607,12 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
     st.subheader("Οριστικοποίηση")
     st.caption(
         "Γράφει τον πίνακα στο μητρώο του έτους και κλειδώνει. "
-        "Δεν επιτρέπονται άλλες αλλαγές — δεν αναιρείται από την εφαρμογή."
+        "Δεν επιτρέπονται άλλες αλλαγές — δεν αναιρείται από την εφαρμογή. "
+        "Απορρίπτεται όσο εκκρεμούν προτάσεις ή παραμένει εκλέκτορας με κώλυμα."
     )
     confirmed = st.checkbox(f"Επιβεβαιώνω την οριστικοποίηση του {year}")
     if st.button("Οριστικοποίηση έτους", disabled=not confirmed):
-        message = db.finalize_year(year, user_email)
+        message = db.finalize_year(year, user_email, blocked)
         (st.success if "οριστικοποιήθηκε" in message else st.error)(message)
         if "οριστικοποιήθηκε" in message:
             st.rerun()
@@ -626,6 +681,10 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
             f"{BLOCKED_MARK} {blocked_here} εκλέκτορες έχουν κώλυμα αποκλεισμού "
             "από τα μητρώα και πρέπει να αφαιρεθούν ή να τεκμηριωθεί η παραμονή τους."
         )
+        _remove_blocked_block(
+            year, subject, blocked, registry_by_id, user_email,
+            scope=f"στο «{label}»", key=f"blk_{field_code}",
+        )
     changed_here = (
         int(subject["elector_id"].astype("int64").isin(changes).sum())
         if not subject.empty else 0
@@ -671,7 +730,9 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         help="Ξεμαρκάρετε για την ακριβή μορφή που κατατίθεται.",
     )
     people = external_table.prepare_registry(registry)
-    _preview_block(year, field_code, subject, registry_by_id, people, fold, marks)
+    _preview_block(
+        year, field_code, subject, registry_by_id, people, fold, marks, blocked
+    )
 
     st.divider()
     st.subheader("Συγκεντρωτική αναφορά Word")
@@ -684,4 +745,6 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     if coordinator:
         st.divider()
         st.subheader("Συντονιστής")
-        _coordinator_block(year, field_code, label, registry_by_id, user_email)
+        _coordinator_block(
+            year, field_code, label, registry_by_id, user_email, table, blocked
+        )

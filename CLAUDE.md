@@ -335,6 +335,18 @@ elector's justification. Widget keys also include the elector id, because
 Streamlit keeps the stored value of a key that has not changed and would
 override the new defaults.
 
+**Electors with a κώλυμα are not dropped automatically.** A κώλυμα is a fact,
+but removing somebody from a submitted list is a decision whose reason has to
+survive on the record — so `db.propose_removals` files ordinary `ΑΦΑΙΡΕΣΗ`
+proposals in bulk (skipping any that already exist), offered both per subject
+and for the whole year. Three things keep this from being forgotten, which it
+was between 2026-09-05 and 2026-09-06: the 🔴 warning above each subject's
+table, an error on the projected table if any remain, and
+`db.finalize_year(..., blocked_ids=...)`, which **refuses to lock the year**
+while one is still in it. The UI check alone is not enough — locking is the one
+write that cannot be undone. For 2026 this is 34 people across 58 rows in 32
+subjects.
+
 Roles are two, and there is deliberately **no users table**: a coordinator is an
 email listed in the `coordinator_emails` setting (same mechanism as
 `allowed_emails`), everyone else who passes the login gate is a member. Members

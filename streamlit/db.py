@@ -375,8 +375,16 @@ def working_electors(year: int, include_pending: bool = False) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def finalize_year(year: int, locked_by: str) -> str:
-    """Write the computed table into external_electors and freeze the year."""
+def finalize_year(
+    year: int, locked_by: str, blocked_ids: set[int] | None = None
+) -> str:
+    """Write the computed table into external_electors and freeze the year.
+
+    ``blocked_ids`` are the electors carrying a κώλυμα in the current registry.
+    They are refused outright: a locked year is the submitted document, and an
+    excluded elector must not reach it — the UI check alone is not enough,
+    because this is the one write that cannot be undone.
+    """
     engine = get_engine()
     if engine is None:
         return "Δεν υπάρχει βάση δεδομένων."
@@ -395,6 +403,15 @@ def finalize_year(year: int, locked_by: str) -> str:
     table = working_electors(year)
     if table.empty:
         return "Ο πίνακας είναι κενός — δεν κλειδώνεται."
+
+    if blocked_ids:
+        still = table[table["elector_id"].astype("int64").isin(blocked_ids)]
+        if not still.empty:
+            people = still["elector_id"].nunique()
+            return (
+                f"Ο πίνακας περιέχει ακόμη {people} εκλέκτορες με κώλυμα "
+                f"({len(still)} εγγραφές). Αφαιρέστε τους πρώτα."
+            )
 
     records = table.to_dict("records")
     with engine.begin() as conn:
@@ -530,6 +547,69 @@ def decide_proposal(
     if not updated:
         return "Η πρόταση δεν εκκρεμεί πλέον."
     return f"Η πρόταση {proposal_id}: {status.lower()}."
+
+
+def propose_removals(
+    year: int, targets: list[tuple[int, int]], note: str, author: str
+) -> str:
+    """Propose removing several electors at once, skipping duplicates.
+
+    Used for the electors carrying a κώλυμα: the removal is not automatic —
+    it goes through a proposal like everything else, so the reason is on record
+    — but nobody should have to file dozens of them by hand.
+    """
+    engine = get_engine()
+    if engine is None:
+        return "Δεν υπάρχει βάση δεδομένων."
+    state = year_state(year)
+    if state is None or state["status"] == LOCKED:
+        return f"Το έτος {year} δεν είναι ανοιχτό."
+    if not targets:
+        return "Δεν υπάρχει κανείς προς αφαίρεση."
+
+    existing = list_proposals(year, status=PENDING)
+    already = (
+        {
+            (int(row.field_code), int(row.elector_id))
+            for row in existing.itertuples(index=False)
+            if row.action == REMOVE
+        }
+        if not existing.empty
+        else set()
+    )
+    rows = [
+        {
+            "year": year,
+            "field_code": field_code,
+            "elector_id": elector_id,
+            "action": REMOVE,
+            "characterization": None,
+            "reasoning": None,
+            "note": note.strip(),
+            "author": author,
+        }
+        for field_code, elector_id in targets
+        if (field_code, elector_id) not in already
+    ]
+    if not rows:
+        return "Υπάρχουν ήδη εκκρεμείς προτάσεις αφαίρεσης για όλους."
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO proposals
+                    (year, field_code, elector_id, action, characterization,
+                     reasoning, note, author)
+                VALUES (:year, :field_code, :elector_id, :action, :characterization,
+                        :reasoning, :note, :author)
+                """
+            ),
+            rows,
+        )
+    skipped = len(targets) - len(rows)
+    message = f"Καταχωρήθηκαν {len(rows)} προτάσεις αφαίρεσης."
+    return message + (f" ({skipped} υπήρχαν ήδη.)" if skipped else "")
 
 
 def decide_field_proposals(
