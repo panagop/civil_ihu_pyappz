@@ -11,10 +11,14 @@ widgets rebuilt on every rerun, for a worse layout.
 
 from __future__ import annotations
 
+import io
+
 import pandas as pd
 import streamlit as st
 
 import db
+import external_table
+from external_report import build_report
 
 ID_COL = "Κωδικός Χρήστη"
 
@@ -298,10 +302,20 @@ def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
             st.rerun()
 
 
+def _to_excel(frame: pd.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+    frame.to_excel(buffer, index=False)
+    return buffer.getvalue()
+
+
 def _preview_block(year: int, field_code: int, current: pd.DataFrame,
-                   registry_by_id: dict, blocked: set[int],
-                   changes: dict[int, str]) -> None:
-    """The table as it would stand if every pending proposal were approved."""
+                   registry_by_id: dict, people: pd.DataFrame, fold,
+                   marks: bool) -> None:
+    """The table as it would stand if every pending proposal were approved.
+
+    Shaped by external_table, so it has the submitted layout — the same columns
+    the browse tab shows and the Word report prints.
+    """
     projected_all = db.working_electors(year, include_pending=True)
     projected = (
         projected_all[projected_all["field_code"] == field_code]
@@ -326,15 +340,8 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
         and now_values[int(row.elector_id)] != (row.characterization, row.reasoning)
     } if not projected.empty else set()
 
-    if not (removed or added or modified):
-        st.caption(
-            "Καμία εκκρεμής πρόταση για αυτό το αντικείμενο — "
-            "ο πίνακας παραμένει όπως φαίνεται παραπάνω."
-        )
-        return
-
     col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Σύνολο", len(projected), delta=len(projected) - len(current))
+    col_a.metric("Σύνολο", len(projected), delta=len(projected) - len(current) or None)
     col_b.metric("Προσθήκες", len(added))
     col_c.metric("Αφαιρέσεις", len(removed))
     col_d.metric("Μεταβολές", len(modified))
@@ -345,20 +352,117 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
             + ", ".join(_person_label(registry_by_id, i) for i in sorted(removed))
         )
 
-    view = _decorate(projected, registry_by_id, blocked, pd.DataFrame(), changes)
-    if not view.empty:
+    # Built by external_table, exactly as the browse tab and the Word report
+    # build it — this is the table that gets submitted, not a review view.
+    view = external_table.build(projected, people, fold)
+    if marks and not view.empty:
+        view = view.copy()
         view.insert(
             0,
             "Πρόταση",
             [
-                "➕ νέος" if int(i) in added else ("🔄 μεταβολή" if int(i) in modified else "")
+                "➕ νέος" if int(i) in added
+                else ("🔄 μεταβολή" if int(i) in modified else "")
                 for i in view[ID_COL]
             ],
         )
     st.dataframe(view, use_container_width=True, hide_index=True)
-    st.caption(
-        "Προβολή — τίποτα από αυτά δεν ισχύει μέχρι να τα εγκρίνει ο συντονιστής."
+
+    st.download_button(
+        "Λήψη Excel",
+        data=_to_excel(view),
+        file_name=f"external_{year}_{field_code}_προβολή.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"preview_dl_{field_code}",
     )
+    if added or removed or modified:
+        st.caption(
+            "Περιλαμβάνει εκκρεμείς προτάσεις — δεν ισχύουν μέχρι να τις "
+            "εγκρίνει ο συντονιστής."
+        )
+
+
+def _change_entries(
+    year: int, registry_by_id: dict
+) -> dict[str, list[dict]]:
+    """Per subject code, the accepted and pending changes with their reasons.
+
+    Rejected and withdrawn proposals are left out: the department is being
+    shown what moved, not what was considered.
+    """
+    proposals = db.list_proposals(year)
+    if proposals.empty:
+        return {}
+    proposals = proposals[proposals["status"].isin([db.ACCEPTED, db.PENDING])]
+
+    entries: dict[str, list[dict]] = {}
+    for row in proposals.itertuples(index=False):
+        if row.action == db.ADD:
+            detail = f"Προστίθεται ως {row.characterization}"
+        elif row.action == db.REMOVE:
+            detail = "Αφαιρείται"
+        else:
+            detail = f"Χαρακτηρισμός: {row.characterization}"
+        entries.setdefault(str(int(row.field_code)), []).append(
+            {
+                "action": row.action,
+                "person": _person_label(registry_by_id, int(row.elector_id)),
+                "detail": detail,
+                "note": row.note or "",
+                "status": row.status,
+            }
+        )
+    return entries
+
+
+def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFrame,
+                  people: pd.DataFrame, fold, registry_by_id: dict,
+                  locked: bool) -> None:
+    """Generate the consolidated Word report for the year as it now stands."""
+    st.caption(
+        "Ο ίδιος πίνακας που κατατίθεται, για όλα τα αντικείμενα, με έναν "
+        "πίνακα μεταβολών ανά αντικείμενο (τι αφαιρείται, τι προστίθεται, τι "
+        "αλλάζει και γιατί)."
+    )
+    if st.button("Δημιουργία αναφοράς Word", key="prep_report"):
+        with st.spinner("Δημιουργία αναφοράς…"):
+            subjects = antikeimena.set_index("Code")
+            workbook: dict[str, dict] = {}
+            for code, group in projected_all.groupby("field_code", sort=True):
+                subject = subjects.loc[code] if code in subjects.index else None
+                workbook[str(code)] = {
+                    "code": int(code),
+                    "field": (
+                        subject["field"] if subject is not None
+                        else f"(άγνωστο {code})"
+                    ),
+                    "domain": subject["domain"] if subject is not None else "",
+                    "df": external_table.build(group, people, fold),
+                }
+            st.session_state["prep_report_file"] = (
+                build_report(
+                    workbook,
+                    year,
+                    "βάση δεδομένων",
+                    changes=_change_entries(year, registry_by_id),
+                    draft=not locked,
+                ),
+                f"ekloktores_{year}{'' if locked else '_προχειρο'}.docx",
+            )
+
+    if "prep_report_file" in st.session_state:
+        report, filename = st.session_state["prep_report_file"]
+        st.download_button(
+            f"Λήψη «{filename}»",
+            data=report,
+            file_name=filename,
+            mime=(
+                "application/vnd.openxmlformats-officedocument"
+                ".wordprocessingml.document"
+            ),
+            key="prep_report_dl",
+            type="primary",
+        )
 
 
 def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
@@ -558,7 +662,24 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
 
     st.divider()
     st.subheader(f"Ο πίνακας του {year} μετά τις προτεινόμενες αλλαγές")
-    _preview_block(year, field_code, subject, registry_by_id, blocked, changes)
+    st.caption(
+        "Οι στήλες του υποβαλλόμενου πίνακα. Τα στοιχεία των προσώπων "
+        "προέρχονται από το τρέχον μητρώο ΑΠΕΛΛΑ."
+    )
+    marks = st.checkbox(
+        "Σήμανση των προτεινόμενων αλλαγών", value=True, key="preview_marks",
+        help="Ξεμαρκάρετε για την ακριβή μορφή που κατατίθεται.",
+    )
+    people = external_table.prepare_registry(registry)
+    _preview_block(year, field_code, subject, registry_by_id, people, fold, marks)
+
+    st.divider()
+    st.subheader("Συγκεντρωτική αναφορά Word")
+    _report_block(
+        year,
+        db.working_electors(year, include_pending=True),
+        antikeimena, people, fold, registry_by_id, locked,
+    )
 
     if coordinator:
         st.divider()

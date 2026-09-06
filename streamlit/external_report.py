@@ -46,6 +46,22 @@ COLUMN_WIDTHS = {
 }
 DEFAULT_WIDTH_CM = 2.0
 
+# The per-subject table of proposed changes. Deliberately narrow: the electors'
+# full details are already in the main table above it, so all this needs to
+# carry is who, what, and why.
+CHANGE_COLUMNS = {
+    "Ενέργεια": 2.2,
+    "Εκλέκτορας": 5.0,
+    "Μεταβολή": 5.0,
+    "Αιτιολόγηση μεταβολής": 13.3,
+    "Κατάσταση": 2.2,
+}
+CHANGE_FONT_PT = 8.0
+
+DRAFT_NOTICE = (
+    "ΠΡΟΧΕΙΡΟ — περιλαμβάνει προτάσεις που δεν έχουν εγκριθεί ακόμη"
+)
+
 
 def _landscape_a4(document: Document) -> None:
     section = document.sections[0]
@@ -108,11 +124,46 @@ def _counts(frame) -> tuple[int, int]:
     return int((values == "ΙΔΙΟΥ").sum()), int((values == "ΣΥΝΑΦΟΥΣ").sum())
 
 
-def build_report(workbook: dict[str, dict], year, source_label: str) -> bytes:
+def _add_change_table(document: Document, entries: list[dict]) -> None:
+    """The proposed additions, removals and changes for one subject."""
+    columns = list(CHANGE_COLUMNS)
+    table = document.add_table(rows=1, cols=len(columns))
+    table.style = "Table Grid"
+    table.autofit = False
+    widths = [Cm(CHANGE_COLUMNS[name]) for name in columns]
+
+    for index, name in enumerate(columns):
+        cell = table.rows[0].cells[index]
+        cell.width = widths[index]
+        _set_cell(cell, name, bold=True, size=CHANGE_FONT_PT)
+    table.rows[0]._tr.get_or_add_trPr().append(_repeat_header_element())
+
+    for entry in entries:
+        cells = table.add_row().cells
+        for index, key in enumerate(
+            ["action", "person", "detail", "note", "status"]
+        ):
+            cells[index].width = widths[index]
+            _set_cell(cells[index], entry.get(key, ""), size=CHANGE_FONT_PT)
+
+
+def build_report(
+    workbook: dict[str, dict],
+    year,
+    source_label: str,
+    changes: dict[str, list[dict]] | None = None,
+    draft: bool = False,
+) -> bytes:
     """One Word document covering every γνωστικό αντικείμενο.
 
     Starts with a summary table of all subjects and their counts, then one
-    landscape page per subject.
+    landscape page per subject. When ``changes`` is given, each subject is
+    followed by a short table of the proposed additions, removals and changes
+    with the reason for each — the department needs to see what moved, not just
+    the result.
+
+    ``draft`` marks the document as not yet approved; a report of a year still
+    under preparation must never be mistaken for the final one.
     """
     document = Document()
     _landscape_a4(document)
@@ -126,6 +177,13 @@ def build_report(workbook: dict[str, dict], year, source_label: str) -> bytes:
         f"δημιουργήθηκε {date.today().strftime('%d/%m/%Y')}"
     )
     run.italic = True
+
+    if draft:
+        notice = document.add_paragraph()
+        notice.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = notice.add_run(DRAFT_NOTICE)
+        run.bold = True
+        run.font.size = Pt(12)
 
     entries = sorted(workbook.values(), key=lambda entry: int(entry["code"]))
 
@@ -167,6 +225,14 @@ def build_report(workbook: dict[str, dict], year, source_label: str) -> bytes:
         columns = [name for name in COLUMN_WIDTHS if name in frame.columns]
         columns += [name for name in frame.columns if name not in COLUMN_WIDTHS]
         _add_table(document, frame, columns)
+
+        subject_changes = (changes or {}).get(str(entry["code"]), [])
+        if subject_changes:
+            document.add_paragraph()
+            document.add_heading(
+                f"Μεταβολές ({len(subject_changes)})", level=2
+            )
+            _add_change_table(document, subject_changes)
 
     buffer = io.BytesIO()
     document.save(buffer)

@@ -18,6 +18,7 @@ civil_ihu_pyappz/
 │   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
 │   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
+│   ├── external_table.py             # THE submitted table's layout + registry join
 │   ├── external_report.py            # Consolidated Word report (landscape A4)
 │   ├── proposals_ui.py               # "Προετοιμασία <έτους>" tab — the only writing UI
 │   ├── pages/
@@ -236,9 +237,13 @@ One row per (year, γνωστικό αντικείμενο, elector) — see [st
 | `created_at` | |
 
 Only the *decisions* live here. Name, φορέας, βαθμίδα, ΦΕΚ etc. are joined in
-from **that year's** ΑΠΕΛΛΑ export at display time, so they are never
-duplicated and a historical table still renders as it was submitted. The
-year → export mapping is [files/mitroa/registry_snapshots.csv](files/mitroa/registry_snapshots.csv)
+from an ΑΠΕΛΛΑ export at display time by
+[streamlit/external_table.py](streamlit/external_table.py), which owns the join
+and the column order so the browse tab, the preview of a year in preparation
+and the Word report cannot drift apart. A finalised year joins **its own**
+snapshot (the electors as they stood when submitted); a year being prepared
+joins the current one. Nothing is duplicated, and a historical table still
+renders as it was submitted. The year → export mapping is [files/mitroa/registry_snapshots.csv](files/mitroa/registry_snapshots.csv)
 (`db.registry_file_for_year`) — a file, not a table, because it must also
 resolve where there is no database, and because the export filenames are date
 stamps rather than years. **Never delete an old parquet export**: without it
@@ -291,10 +296,13 @@ the coordinator resolves them.
 on top of the accepted ones, projecting what the table would become if
 everything proposed were approved. The tab renders it under "Ο πίνακας του
 <έτους> μετά τις προτεινόμενες αλλαγές", between the proposal forms and the
-coordinator section: removals are gone, additions carry ➕, changed rows 🔄, and
-the person columns come from the current ΑΠΕΛΛΑ export. Accepted proposals are
-replayed before pending ones — they are already reality, so a pending change to
-the same elector should win.
+coordinator section: removals are gone, additions and changes are listed, and
+the person columns come from the current ΑΠΕΛΛΑ export. It is shaped by
+`external_table`, so it carries **the submitted layout** — this is the table
+that goes to the department, not a review view; a checkbox adds a marker column
+and can be cleared for the exact submitted form, and it downloads as Excel.
+Accepted proposals are replayed before pending ones — they are already reality,
+so a pending change to the same elector should win.
 
 Replay rules (`working_electors`): proposals are applied in decision order, so a
 later accepted one wins; `ΧΑΡΑΚΤΗΡΙΣΜΟΣ`/`ΑΙΤΙΟΛΟΓΗΣΗ` aimed at an elector who
@@ -341,6 +349,15 @@ document covering all 52 subjects — a summary table, then a landscape A4 page
 each. It takes the same parsed structure either source produces, so the button
 works identically for file and database. ~9 s for 1.476 rows, so it sits behind
 a button and a spinner rather than being built on load.
+
+`build_report(..., changes=..., draft=...)` adds, under each subject, a short
+table of the additions, removals and changes with the reason for each — only
+who / what / why, since the electors' full details are in the table above it.
+Rejected and withdrawn proposals are left out. `draft=True` stamps
+"ΠΡΟΧΕΙΡΟ — περιλαμβάνει προτάσεις που δεν έχουν εγκριθεί ακόμη" under the
+title, so a report of a year still in preparation cannot be mistaken for the
+final one; the "Προετοιμασία <έτους>" tab generates exactly this from the
+projected table, and drops the stamp once the year is locked.
 
 **Word, not PDF, on purpose.** `docx2pdf` (already in `pyproject.toml`) shells
 out to a real Microsoft Word install and is Windows-only — it cannot run in the

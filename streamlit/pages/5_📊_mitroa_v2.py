@@ -15,6 +15,7 @@ st.set_page_config(
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
+import external_table  # noqa: E402
 import proposals_ui  # noqa: E402
 from external_report import build_report  # noqa: E402
 
@@ -57,29 +58,9 @@ SOURCE_DB = "Βάση δεδομένων"
 WORKING_YEAR = 2026
 BASELINE_YEAR = 2025
 
-# Rebuilding a stored year to look exactly like the submitted workbook: the
-# registry export names three columns differently from the workbook.
-REGISTRY_TO_WORKBOOK = {
-    "Φορέας": "Φορέας Χρήστη",
-    "Σχολή": "Σχολή Χρήστη",
-    "Τμήμα/Ινστιτούτο": "Τμήμα/Ινστιτούτο Χρήστη",
-}
-# The submitted workbooks' column order, reproduced for the database view
-WORKBOOK_COLUMNS = [
-    "α/α",
-    CHARAKTIRISMOS_COL,
-    ID_COL,
-    "Όνομα",
-    "Επώνυμο",
-    "Κατηγορία Χρήστη",
-    "Φορέας Χρήστη",
-    "Σχολή Χρήστη",
-    "Τμήμα/Ινστιτούτο Χρήστη",
-    "ΦΕΚ Διορισμού",
-    SUBJECT_COL,
-    "Βαθμίδα",
-    REASONING_COL,
-]
+# The submitted table's layout lives in external_table, so the browse tab, the
+# preview of the year being prepared and the Word report cannot drift apart.
+WORKBOOK_COLUMNS = external_table.WORKBOOK_COLUMNS
 # Fields compared between the year tables and the registry, as
 # (column in the external tables, column in the registry, label)
 COMPARED_FIELDS = [
@@ -213,40 +194,18 @@ def load_external_from_db(year: int) -> dict[str, dict]:
 
     subjects = load_antikeimena().set_index("Code")
     registry_path = db.registry_file_for_year(year)
-    if registry_path is None:
-        people = pd.DataFrame(columns=[ID_COL])
-    else:
-        people = load_professors(str(registry_path)).rename(columns=REGISTRY_TO_WORKBOOK)
-    people = people.copy()
-    people[ID_COL] = people[ID_COL].astype("int64")
-
-    decisions = decisions.rename(
-        columns={
-            "characterization": CHARAKTIRISMOS_COL,
-            "reasoning": REASONING_COL,
-            "elector_id": ID_COL,
-        }
+    people = external_table.prepare_registry(
+        load_professors(str(registry_path)) if registry_path else None
     )
-    merged = decisions.merge(people, on=ID_COL, how="left")
 
     parsed: dict[str, dict] = {}
-    for code, group in merged.groupby("field_code", sort=True):
-        group = group.sort_values(
-            [CHARAKTIRISMOS_COL, "Επώνυμο", "Όνομα"],
-            key=lambda col: (
-                col.ne("ΙΔΙΟΥ") if col.name == CHARAKTIRISMOS_COL
-                else fold_greek_series(col)
-            ),
-        ).reset_index(drop=True)
-        group.insert(0, "α/α", range(1, len(group) + 1))
-
-        columns = [col for col in WORKBOOK_COLUMNS if col in group.columns]
+    for code, group in decisions.groupby("field_code", sort=True):
         subject = subjects.loc[code] if code in subjects.index else None
         parsed[str(code)] = {
             "code": code,
             "field": subject["field"] if subject is not None else f"(άγνωστο {code})",
             "domain": subject["domain"] if subject is not None else "",
-            "df": group[columns].fillna(""),
+            "df": external_table.build(group, people, fold_greek_series),
         }
     return parsed
 
