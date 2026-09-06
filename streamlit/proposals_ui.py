@@ -455,6 +455,7 @@ def _change_entries(
     year: int, registry_by_id: dict, auto_removed: pd.DataFrame,
     table: pd.DataFrame | None = None,
     registry_moves: dict[int, str] | None = None,
+    baseline: pd.DataFrame | None = None,
 ) -> dict[str, list[dict]]:
     """Per subject code, everything that changed since the baseline, with why.
 
@@ -464,7 +465,12 @@ def _change_entries(
     not changes to the list but *are* changes to what the list prints.
 
     Rejected and withdrawn proposals are left out: the department is being
-    shown what moved, not what was considered.
+    shown what moved, not what was considered. So is a `ΜΕΤΑΒΟΛΗ` that leaves
+    the characterisation where it was: rewording a justification changes the
+    text printed next to the elector, not their standing in the μητρώο, and
+    listing it as a change only buries the ones that matter. The comparison is
+    against what held *before* — ``baseline`` plus any addition already
+    replayed — not against the proposal itself, which carries the new value.
     """
     entries: dict[str, list[dict]] = {}
 
@@ -501,13 +507,29 @@ def _change_entries(
         return _ordered(entries)
     proposals = proposals[proposals["status"].isin([db.ACCEPTED, db.PENDING])]
 
+    # What each elector's characterisation was before the proposals ran
+    held = (
+        {
+            (int(row.field_code), int(row.elector_id)): row.characterization
+            for row in baseline.itertuples(index=False)
+        }
+        if baseline is not None and not baseline.empty
+        else {}
+    )
+
     for row in proposals.itertuples(index=False):
+        key = (int(row.field_code), int(row.elector_id))
         if row.action == db.ADD:
             detail = f"Προστίθεται ως {row.characterization}"
+            held[key] = row.characterization
         elif row.action == db.REMOVE:
             detail = "Αφαιρείται"
         else:
-            detail = f"Χαρακτηρισμός: {row.characterization}"
+            before = held.get(key)
+            if row.characterization is None or row.characterization == before:
+                continue  # justification reworded, standing unchanged
+            detail = f"Χαρακτηρισμός: {before} → {row.characterization}"
+            held[key] = row.characterization
         entries.setdefault(str(int(row.field_code)), []).append(
             {
                 "action": row.action,
@@ -531,7 +553,8 @@ def _ordered(entries: dict[str, list[dict]]) -> dict[str, list[dict]]:
 def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFrame,
                   people: pd.DataFrame, fold, registry_by_id: dict,
                   locked: bool, auto_removed: pd.DataFrame,
-                  registry_moves: dict[int, str]) -> None:
+                  registry_moves: dict[int, str],
+                  baseline: pd.DataFrame | None) -> None:
     """Generate the consolidated Word report for the year as it now stands."""
     st.caption(
         "Ο ίδιος πίνακας που κατατίθεται, για όλα τα αντικείμενα, με έναν "
@@ -560,7 +583,7 @@ def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFr
                     "βάση δεδομένων",
                     changes=_change_entries(
                         year, registry_by_id, auto_removed,
-                        projected_all, registry_moves,
+                        projected_all, registry_moves, baseline,
                     ),
                     draft=not locked,
                 ),
@@ -825,6 +848,7 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         antikeimena, people, fold, registry_by_id, locked,
         db.auto_removals(year, blocked, include_pending=True),
         changes,
+        db.load_external_electors(state["baseline_year"]),
     )
 
     if coordinator:

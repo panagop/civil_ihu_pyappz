@@ -365,7 +365,16 @@ baseline year's export and the current one (`registry_changes`, action
 `ΕΝΗΜΕΡΩΣΗ`). The last are not changes to the list, but they *are* changes to
 what the list prints, so a reader must see the values were updated rather than
 wonder why they differ from last year. Entries are ordered
-ΑΦΑΙΡΕΣΗ → ΠΡΟΣΘΗΚΗ → ΜΕΤΑΒΟΛΗ → ΕΝΗΜΕΡΩΣΗ within a subject. For 2026: 58
+ΑΦΑΙΡΕΣΗ → ΠΡΟΣΘΗΚΗ → ΜΕΤΑΒΟΛΗ → ΕΝΗΜΕΡΩΣΗ within a subject.
+
+A `ΜΕΤΑΒΟΛΗ` that leaves the characterisation where it was is **left out of the
+report**: rewording a justification changes the text printed next to an elector,
+not their standing in the μητρώο, and listing it buries the changes that matter.
+It is compared against what held *before* — the baseline year plus any addition
+already replayed — never against the proposal itself, which carries the new
+value. The legacy `ΑΙΤΙΟΛΟΓΗΣΗ` action is reasoning-only by definition and is
+dropped the same way. The preview and the tab still show these; only the
+submitted document omits them. For 2026: 58
 removals and 132 registry updates, so every one of the 52 subjects has a table.
 
 Roles are two, and there is deliberately **no users table**: a coordinator is an
