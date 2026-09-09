@@ -12,8 +12,10 @@ st.set_page_config(
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from auth import require_ihu_login  # noqa: E402
+from branding import apply_branding  # noqa: E402
 
 require_ihu_login()
+apply_branding()
 
 from settings import require_secret  # noqa: E402
 

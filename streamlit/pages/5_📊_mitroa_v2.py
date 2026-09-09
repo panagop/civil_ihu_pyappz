@@ -15,11 +15,13 @@ st.set_page_config(
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
+from branding import apply_branding  # noqa: E402
 import external_table  # noqa: E402
 import proposals_ui  # noqa: E402
 from external_report import build_report  # noqa: E402
 
 require_ihu_login()
+apply_branding()
 
 # Also called from home.py, but Streamlit runs only the page you open: a
 # visitor landing straight here would otherwise find the historical years
@@ -514,7 +516,7 @@ with tab_antikeimena:
 
     st.dataframe(
         filtered_ant,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Code": st.column_config.NumberColumn("Κωδικός", format="%d"),
@@ -618,7 +620,7 @@ with tab_external:
         else:
             st.metric("Σύνολο εκλεκτόρων", len(df_ext))
 
-        st.dataframe(df_ext, use_container_width=True, hide_index=True)
+        st.dataframe(df_ext, width="stretch", hide_index=True)
 
         col_one, col_all = st.columns(2)
         col_one.download_button(
@@ -721,7 +723,7 @@ with tab_check:
         )
         if only_findings:
             summary = summary[summary["Ευρήματα"] > 0]
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        st.dataframe(summary, width="stretch", hide_index=True)
 
         st.markdown("### Αναλυτικά")
         objects = ["(όλα)"] + [
@@ -741,7 +743,7 @@ with tab_check:
         if view.empty:
             st.success("Δεν βρέθηκαν ευρήματα για την επιλογή αυτή.")
         else:
-            st.dataframe(view, use_container_width=True, hide_index=True)
+            st.dataframe(view, width="stretch", hide_index=True)
 
         st.download_button(
             "Λήψη ευρημάτων (Excel)",
@@ -874,7 +876,7 @@ with tab_keywords:
         if results.empty:
             st.info("Δεν βρέθηκαν εκλέκτορες για τις λέξεις αυτές.")
         else:
-            st.dataframe(results, use_container_width=True, hide_index=True)
+            st.dataframe(results, width="stretch", hide_index=True)
             st.download_button(
                 "Λήψη Excel",
                 data=to_excel_bytes(results),
@@ -884,7 +886,7 @@ with tab_keywords:
             )
 
         with st.expander("Πλήθος ανά λέξη-κλειδί"):
-            st.dataframe(per_keyword, use_container_width=True, hide_index=True)
+            st.dataframe(per_keyword, width="stretch", hide_index=True)
 
 
 with tab_proposals:

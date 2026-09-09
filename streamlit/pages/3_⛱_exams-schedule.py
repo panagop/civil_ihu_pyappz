@@ -15,6 +15,10 @@ st.set_page_config(
     page_icon="🗓️",
 )
 
+from branding import apply_branding  # noqa: E402
+
+apply_branding()
+
 EXAMS_DIR = Path(__file__).parent.parent.parent / "files" / "exams"
 
 exam_periods = discover_exam_periods(EXAMS_DIR)

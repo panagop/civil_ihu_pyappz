@@ -15,6 +15,10 @@ st.set_page_config(
     page_icon="📅",
 )
 
+from branding import apply_branding  # noqa: E402
+
+apply_branding()
+
 st.title("📅 Εβδομαδιαίο Πρόγραμμα Μαθημάτων")
 
 period_selection = st.radio(

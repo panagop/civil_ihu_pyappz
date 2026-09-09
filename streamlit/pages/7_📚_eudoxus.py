@@ -25,9 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db  # noqa: E402
 import eudoxus_db as edb  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
+from branding import apply_branding  # noqa: E402
 from eudoxus_client import Eudoxus  # noqa: E402
 
 require_ihu_login()
+apply_branding()
 
 # Also called from home.py, but Streamlit runs only the page you open.
 db.bootstrap()
@@ -150,7 +152,7 @@ with tab_browse:
         unknown = int(shown["checked_at"].isna().sum())
         counters[3].metric("Χωρίς έλεγχο", unknown)
 
-        st.dataframe(to_display(shown), use_container_width=True, hide_index=True)
+        st.dataframe(to_display(shown), width="stretch", hide_index=True)
         st.download_button(
             "Λήψη σε Excel",
             data=to_excel(to_display(shown)),
@@ -220,7 +222,7 @@ with tab_check:
         st.markdown("### Βιβλία που δεν μπορούν να επιλεγούν ξανά")
         st.dataframe(
             to_display(problems, {"reason": "Αιτία"}),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.download_button(
@@ -236,7 +238,7 @@ with tab_check:
                 "Δεν αναφέρονται ως προβληματικά: η απουσία απάντησης δεν είναι "
                 "αρνητική απάντηση."
             )
-            st.dataframe(to_display(never_checked), use_container_width=True, hide_index=True)
+            st.dataframe(to_display(never_checked), width="stretch", hide_index=True)
 
 
 # --------------------------------------------------------------------------
@@ -277,7 +279,7 @@ with tab_edit:
                 st.warning("Το μάθημα δεν έχει βιβλία.")
             else:
                 st.dataframe(
-                    to_display(current), use_container_width=True, hide_index=True
+                    to_display(current), width="stretch", hide_index=True
                 )
                 unusable = current[
                     current["checked_at"].notna()
@@ -388,7 +390,7 @@ with tab_edit:
                             ["book_id", "title", "authors", "publisher",
                              "publication_year", "active", "selectable"]
                         ],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                     choices = hits_frame["book_id"].astype(int).tolist()
@@ -478,7 +480,7 @@ with tab_admin:
                             "priority_after": "Σειρά μετά",
                         }
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -487,7 +489,7 @@ with tab_admin:
                 if log.empty:
                     st.caption("Καμία καταγραφή.")
                 else:
-                    st.dataframe(log, use_container_width=True, hide_index=True)
+                    st.dataframe(log, width="stretch", hide_index=True)
 
             st.divider()
             st.markdown("### Κλείδωμα")

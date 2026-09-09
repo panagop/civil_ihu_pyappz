@@ -24,8 +24,10 @@ import db  # noqa: E402
 import perigrammata_db as pdb  # noqa: E402
 import perigrammata_report as report  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
+from branding import apply_branding  # noqa: E402
 
 require_ihu_login()
+apply_branding()
 
 # Also called from home.py, but Streamlit runs only the page you open: a
 # visitor landing straight here would otherwise find the courses unloaded.
@@ -85,7 +87,7 @@ tab_table, tab_stats, tab_edit, tab_word, tab_reports = st.tabs(
 
 with tab_table:
     st.caption(f"{len(courses)} μαθήματα · πρόγραμμα σπουδών {curriculum}")
-    st.dataframe(courses, use_container_width=True, hide_index=True)
+    st.dataframe(courses, width="stretch", hide_index=True)
 
 
 with tab_stats:
@@ -101,7 +103,7 @@ with tab_stats:
     recent = courses[["code", "name", "updated_at", "updated_by"]].sort_values(
         "updated_at", ascending=False
     )
-    st.dataframe(recent.head(15), use_container_width=True, hide_index=True)
+    st.dataframe(recent.head(15), width="stretch", hide_index=True)
 
 
 with tab_edit:
@@ -299,7 +301,7 @@ with tab_reports:
             else:
                 st.dataframe(
                     changes[["code", "label", "edited_by", "edited_at", "note"]],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
                 names = dict(zip(courses["code"], courses["name"]))

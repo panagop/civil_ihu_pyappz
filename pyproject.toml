@@ -39,3 +39,10 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["myproject"]
+
+[tool.ruff.lint]
+# Streamlit pages must call st.set_page_config() before importing anything that
+# touches Streamlit, so imports legitimately follow code. E402 is selected so the
+# "# noqa: E402" comments that document this stay meaningful — since ruff 0.16
+# they are otherwise reported as unused directives across every page.
+extend-select = ["E402"]

@@ -347,7 +347,7 @@ def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
             _person_label(registry_by_id, int(i)) for i in mine["elector_id"]
         ]
     )[["id", "field_code", "Εκλέκτορας", "action", "status", "note", "created_at"]]
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     pending = mine[mine["status"] == db.PENDING]
     if pending.empty:
@@ -432,7 +432,7 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
                 for i in view[ID_COL]
             ],
         )
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     st.download_button(
         "Λήψη Excel",
@@ -657,7 +657,7 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
                 per_field.rename(
                     columns={"field_code": "Κωδικός", "pending": "Εκκρεμείς"}
                 ),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
 
     st.markdown("##### Μαζική απόφαση για το τρέχον αντικείμενο")
@@ -671,7 +671,7 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
             ]
         )[["id", "field_code", "Εκλέκτορας", "action", "characterization",
            "note", "author", "created_at"]]
-        st.dataframe(view, use_container_width=True, hide_index=True)
+        st.dataframe(view, width="stretch", hide_index=True)
 
         with st.form("decide"):
             choice = st.selectbox(
@@ -800,7 +800,7 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
 
     st.dataframe(
         _decorate(subject_all, registry_by_id, blocked, pending, changes),
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
     if len(removed_here):
         st.caption(

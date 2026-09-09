@@ -24,6 +24,7 @@ civil_ihu_pyappz/
 │   ├── perigrammata_db.py            # Περιγράμματα: column spec, schema, load/save/history
 │   ├── seed_perigrammata.py          # Loads files/perigrammata/*.csv into the DB (once)
 │   ├── perigrammata_report.py        # Περιγράμματα Word output (one / all / changes)
+│   ├── branding.py                   # st.logo + department/university names, used by every page
 │   ├── eudoxus_client.py             # Unofficial client for service.eudoxus.gr
 │   ├── eudoxus_db.py                 # Εύδοξος: schema, year copy/lock, catalogue
 │   ├── seed_eudoxus.py               # Loads files/eudoxus/* into the DB (once)
@@ -36,11 +37,13 @@ civil_ihu_pyappz/
 │   │   ├── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
 │   │   └── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
 │   └── .streamlit/
+│       ├── config.toml               # Theme — IS committed (see "Branding and theme")
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
 ├── scripts/
 │   └── write_secrets_toml.py         # Writes [auth] to secrets.toml at container start
 ├── civil_ihu_pyappz/                 # Python package (legacy; perigrammata.py not used by the app)
 ├── files/
+│   ├── logos/                        # Department + university marks (committed, not hot-linked)
 │   ├── exams/                        # Exam Excel files (.xlsm); active: exams-2026-06.xlsm
 │   ├── timetables/                   # Timetable Excel files (.xlsm); active: 2025-2026.xlsm
 │   ├── perigrammata/                 # Frozen Google Sheets export — seed input, then archive
@@ -79,7 +82,9 @@ Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep
 Settings are read through [streamlit/settings.py](streamlit/settings.py), **never
 `st.secrets` directly** — see "Settings lookup" below for why.
 
-`streamlit/.streamlit/secrets.toml` is gitignored. On a new machine, create it manually with:
+`streamlit/.streamlit/secrets.toml` is gitignored — but `config.toml` beside it
+is **not**, deliberately; see "Branding and theme". On a new machine, create the
+secrets file manually with:
 
 ```toml
 gsheet_perigrammata_id = "..."
@@ -669,6 +674,65 @@ and edited in the app. The catalogue is loaded **only while the table is
 empty** — after that the availability check owns it, and re-applying the dump
 on every restart would replace a fresh answer with a stale one. Seeded years are
 inserted as `ΚΛΕΙΔΩΜΕΝΟ`.
+
+## Branding and theme
+
+Two colours, both sampled from the logo files rather than picked by eye:
+
+| | hex | where |
+|---|---|---|
+| Department indigo | `#393184` | `files/logos/civil_ihu_logo.png` |
+| University navy | `#1C3C61` | `files/logos/ihu_logo.png` |
+
+- **The theme lives in [streamlit/.streamlit/config.toml](streamlit/.streamlit/config.toml)**, which
+  Streamlit reads as a *script-level* config because it sits in the entry
+  script's directory — the same rule that puts `secrets.toml` there.
+- **`.gitignore` exempts it on purpose.** The rest of `.streamlit/` is ignored,
+  and git **cannot re-include a file whose parent directory is excluded**, so
+  the rule had to become `**/.streamlit/*` plus `!**/.streamlit/config.toml`.
+  Without that exemption the theme works on every developer machine and
+  silently never reaches Railway — the app deploys unthemed and nothing says so.
+  `secrets.toml` stays ignored by its own rule.
+- **`primaryColor` differs between light and dark on purpose.** Streamlit paints
+  primary-button text white, so the colour has to stay dark enough to carry it:
+  `#393184` gives 10.8:1 in light mode but only 1.75:1 against the dark
+  background, so `[theme.dark]` lifts it to `#6F66C9` (4.75:1 under white text,
+  4.0:1 against the background). Links need to work as body text, hence the
+  lighter `#9B93E8` in dark mode.
+
+[streamlit/branding.py](streamlit/branding.py) holds `apply_branding()`, which
+calls `st.logo`. **`st.logo` applies to the page it is called from, not to the
+app**, so every page script calls it — that is why it is a helper and not one
+line in `home.py`. The module deliberately imports nothing but Streamlit,
+because pages 3 and 4 are public and import no other shared module.
+
+**The logos are committed under `files/logos/`, not hot-linked.** The
+department's URLs are CMS-generated (`/wp-content/uploads/2026/02/…`) and will
+move when the site is reorganised, a remote fetch costs a round trip on every
+page load, and hot-linking would send every visitor's IP to the department's
+server. Both files together are 20 KB.
+
+### Streamlit conventions
+
+Current Streamlit guidance, worth following in new code:
+
+- **`use_container_width` is deprecated** — use `width="stretch"` (or
+  `"content"`). All 21 live occurrences were converted; the one left in
+  `_ooo_exams-schedule_old.py` is in the archived file Streamlit never loads.
+- Prefer Material Symbols (`:material/name:`) over emoji, `st.container(border=True)`
+  for grouping, and sentence casing for headings and labels.
+- Set the theme in `config.toml` rather than injecting CSS: native theming
+  applies to every element and survives upgrades, while CSS selectors target
+  internal class names that change.
+- `pyproject.toml` selects `E402` for ruff. The pages must call
+  `st.set_page_config()` before importing anything that touches Streamlit, so
+  imports legitimately follow code; selecting the rule keeps the `# noqa: E402`
+  comments that document this meaningful. Since ruff 0.16 they are otherwise
+  reported as unused directives on every page — 33 of them.
+- Pages still use the legacy `pages/` folder. Streamlit now recommends
+  `st.navigation` / `st.Page`, which would give proper Greek titles and icons in
+  the sidebar instead of `5_📊_mitroa_v2`-style filenames. Not done: it touches
+  every page.
 
 ## Active data files
 

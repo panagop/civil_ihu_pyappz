@@ -155,7 +155,12 @@ cython_debug/
 keys.json
 
 
-.streamlit/
+# .streamlit holds two very different files: secrets.toml, which must never be
+# committed, and config.toml, which carries the theme and MUST be committed or
+# the app deploys unthemed. Git cannot re-include a file whose parent directory
+# is excluded, so exclude the directory *contents* rather than the directory.
+**/.streamlit/*
+!**/.streamlit/config.toml
 secrets.toml
 
 # Office lock files (created while a workbook is open)

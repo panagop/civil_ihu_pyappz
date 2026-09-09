@@ -1,0 +1,56 @@
+# Theme for the Civil Engineering / IHU app.
+#
+# The two colours are taken from the logo files themselves, not picked by eye:
+#   #393184  department indigo  (files/logos/civil_ihu_logo.png)
+#   #1C3C61  university navy    (files/logos/ihu_logo.png)
+#
+# Streamlit paints primary-button text white, so primaryColor has to stay dark
+# enough to carry it. #393184 gives 10.8:1 in light mode; on a dark background
+# it disappears (1.75:1 against #0E1117), so the dark variant lifts it to
+# #6F66C9 — still 4.75:1 under white text, and 4.0:1 against the background.
+# Links need to work as body text, hence the lighter #9B93E8 in dark mode.
+#
+# This file lives beside home.py's .streamlit/ because Streamlit reads a
+# script-level config from the entry script's directory, the same rule that puts
+# secrets.toml here. It is deliberately EXEMPTED from .gitignore — the rest of
+# .streamlit/ is ignored, and without the exemption the app would deploy
+# unthemed while looking correct on every developer machine.
+
+[theme]
+primaryColor = "#393184"
+font = "Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+
+[theme.light]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F3F8"
+textColor = "#1B1B26"
+linkColor = "#393184"
+borderColor = "#E2E2EC"
+dataframeHeaderBackgroundColor = "#EDEDF5"
+chartCategoricalColors = [
+    "#393184",
+    "#1C3C61",
+    "#00838F",
+    "#B5651D",
+    "#7B1E5A",
+    "#4B7B34",
+    "#5A5A6E",
+]
+
+[theme.dark]
+primaryColor = "#6F66C9"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1A1A24"
+textColor = "#E8E8F0"
+linkColor = "#9B93E8"
+borderColor = "#2E2E3E"
+dataframeHeaderBackgroundColor = "#22222E"
+chartCategoricalColors = [
+    "#9B93E8",
+    "#6FA8DC",
+    "#4DD0E1",
+    "#E5A05A",
+    "#E48FC0",
+    "#9CCC65",
+    "#B0B0C0",
+]
