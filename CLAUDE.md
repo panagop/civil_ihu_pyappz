@@ -254,50 +254,16 @@ Consequences to keep in mind:
   `MIGRATIONS_SQL`, written to be safe on every start (`DROP CONSTRAINT IF
   EXISTS` then `ADD CONSTRAINT`).
 
-### Pending: rename the three tables (agreed 2026-09-06, deliberately deferred)
+### Pending: rename the three tables (agreed 2026-09-06, deferred)
 
-Agreed but **not yet applied** — members are working in the app on the 2026
-tables, and this is not a change to make under them. Do it once 2026 is
-finalised:
-
-| now | to |
-| --- | -- |
-| `external_electors` | `mitroo_electors` |
-| `year_status` | `mitroo_years` |
-| `proposals` | `mitroo_proposals` |
-
-The common prefix is the point: with no SSH and no public proxy, a future
-admin session's `\dt` should show the app's tables as a group.
-
-Cheap in the code — the names appear only in `db.py` and two lines of
-`seed_external.py`. The database side has one trap:
-
-- **The renames must run *before* `SCHEMA_SQL`, not in `MIGRATIONS_SQL`.**
-  Migrations run after the schema, so with the new names in `SCHEMA_SQL` the
-  order would be: create empty `mitroo_electors` → rename `external_electors`
-  to `mitroo_electors` → *relation already exists*. `get_engine()` catches and
-  prints that, so the app would start against three empty tables while the real
-  rows sat orphaned under the old names — indistinguishable from data loss,
-  diagnosable only from the deployment log. Add a third block executed first,
-  guarded so later starts are no-ops:
-
-  ```sql
-  DO $$
-  BEGIN
-    IF to_regclass('public.external_electors') IS NOT NULL
-       AND to_regclass('public.mitroo_electors') IS NULL THEN
-      ALTER TABLE external_electors RENAME TO mitroo_electors;
-    END IF;
-  END $$;
-  ```
-
-- Renaming a table renames **neither its indexes, nor its constraints, nor
-  `proposals_id_seq`**. Rename them in the same pass: a `CheckViolation` still
-  naming `proposals_action_check` is exactly how the 2026-09-05 production bug
-  was identified, and a stale name would misdirect that.
-- There are no foreign keys between the three tables, so nothing breaks
-  structurally.
-- **Export the data first.** The rename cannot be undone from outside Railway.
+`external_electors` → `mitroo_electors`, `year_status` → `mitroo_years`,
+`proposals` → `mitroo_proposals`, so a future admin session's `\dt` shows the
+app's tables as a group. **Not yet applied** — members are working on the 2026
+tables and this is not a change to make under them; do it once 2026 is
+finalised. The renames must run **before** `SCHEMA_SQL`, not in
+`MIGRATIONS_SQL`, or the app silently starts against three empty tables. Read
+[plans/rename-mitroa-tables.md](plans/rename-mitroa-tables.md) before touching
+this.
 
 ### `external_electors`
 
@@ -386,8 +352,10 @@ any proposal is still pending.
 The tab lives in [streamlit/proposals_ui.py](streamlit/proposals_ui.py) — the
 only part of the app that writes anything. Per-subject it shows the computed
 table (🔴 on anyone with a κώλυμα in the current registry, and ➕➖🔄✏️ for
-pending proposals), then sub-tabs for Μεταβολή / Προσθήκη / Οι προτάσεις μου,
-and a coordinator-only section to decide proposals and lock the year. The
+pending proposals), then sub-tabs for Μεταβολή / Προσθήκη / Οι προτάσεις μου.
+Below the per-subject part come the year-wide sections — the projected table,
+the new electors across all subjects, the Word report — and a coordinator-only
+section to decide proposals and lock the year. The
 coordinator can decide the current subject's pending proposals **in bulk**
 (`db.decide_field_proposals` — one UPDATE, so a subject is decided whole or not
 at all; a half-applied batch is hard to reason about when one elector has
@@ -457,6 +425,34 @@ email listed in the `coordinator_emails` setting (same mechanism as
 may propose on any subject; only a coordinator decides proposals and locks a
 year. A table would need an admin screen to manage and still need some way to
 appoint the first admin.
+
+### Νέοι εκλέκτορες, όλα τα αντικείμενα μαζί (added 2026-09-09)
+
+Between the per-subject preview and the Word report, `_additions_block` lists
+**every elector new since the baseline year, across all 52 subjects**, with a
+filter for the still-pending ones and an Excel download. The per-subject
+preview answers "what does this subject look like now"; this answers "who did
+we take in this year", which is the question asked when the whole cycle is
+reviewed — and 52 subjects is too many to answer by clicking through them.
+
+- **"New" is a set difference, not a read of the `ΠΡΟΣΘΗΚΗ` proposals.** It
+  compares `(field_code, elector_id)` between the projected year and the
+  baseline table, so it reports what the year *is*: an addition that was later
+  withdrawn or removed again does not appear, nor does one for somebody who has
+  since lost eligibility (`working_electors` already filtered them). Reading
+  the proposals instead would list decisions, several of which no longer hold.
+- The key is the **pair**, so an elector moved to a different γνωστικό
+  αντικείμενο is correctly new *there* — the same rule the rest of the μητρώα
+  code follows.
+- The proposal that caused each addition is looked up separately
+  (`_addition_meta`) only for the κατάσταση / author / note columns. A row with
+  no proposal behind it still renders, with those columns blank, rather than
+  being dropped.
+- The download follows the pending filter, so the file matches what is on
+  screen.
+- `render` computes `working_electors(..., include_pending=True)` and the
+  baseline **once** and passes them to both this block and the report; they
+  were being recomputed.
 
 ### Consolidated report
 
