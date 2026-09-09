@@ -448,6 +448,171 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
         )
 
 
+# The year-wide additions table: the subject columns first, then the person as
+# the submitted table describes them, then who proposed the addition and why.
+FIELD_CODE_COL = "Κωδ. αντικειμένου"
+FIELD_LABEL_COL = "Αντικείμενο μητρώου"
+PROPOSAL_STATUS_COL = "Κατάσταση πρότασης"
+PROPOSAL_AUTHOR_COL = "Πρόταση από"
+PROPOSAL_NOTE_COL = "Αιτιολόγηση πρότασης"
+
+ADDITIONS_COLUMNS = [
+    "α/α",
+    FIELD_CODE_COL,
+    FIELD_LABEL_COL,
+    external_table.CHARAKTIRISMOS_COL,
+    ID_COL,
+    "Όνομα",
+    "Επώνυμο",
+    "Κατηγορία Χρήστη",
+    "Φορέας Χρήστη",
+    "Σχολή Χρήστη",
+    "Τμήμα/Ινστιτούτο Χρήστη",
+    "ΦΕΚ Διορισμού",
+    external_table.SUBJECT_COL,
+    "Βαθμίδα",
+    external_table.REASONING_COL,
+    PROPOSAL_STATUS_COL,
+    PROPOSAL_AUTHOR_COL,
+    PROPOSAL_NOTE_COL,
+]
+
+
+def _addition_meta(year: int) -> dict[tuple[int, int], dict]:
+    """Per (subject, elector), the ΠΡΟΣΘΗΚΗ proposal that put them there.
+
+    Replayed in the same order as :func:`db.working_electors`, so where an
+    elector was added more than once the surviving proposal is the one whose
+    values the table actually shows.
+    """
+    proposals = db.list_proposals(year)
+    if proposals.empty:
+        return {}
+    proposals = proposals[
+        (proposals["action"] == db.ADD)
+        & proposals["status"].isin([db.ACCEPTED, db.PENDING])
+    ]
+    return {
+        (int(row.field_code), int(row.elector_id)): {
+            PROPOSAL_STATUS_COL: row.status,
+            PROPOSAL_AUTHOR_COL: row.author or "",
+            PROPOSAL_NOTE_COL: row.note or "",
+        }
+        for row in proposals.itertuples(index=False)
+    }
+
+
+def _additions_block(year: int, baseline_year: int, projected_all: pd.DataFrame,
+                     baseline: pd.DataFrame | None, antikeimena: pd.DataFrame,
+                     people: pd.DataFrame, fold) -> None:
+    """Every elector new to a subject since the baseline year, all 52 at once.
+
+    Computed as a set difference against the baseline table rather than read
+    off the ΠΡΟΣΘΗΚΗ proposals, so it says what the year *is* — an addition
+    that was later withdrawn or removed again does not appear, and neither does
+    one for somebody who has since lost eligibility, because ``projected_all``
+    is already filtered.
+    """
+    baseline_keys = (
+        {
+            (int(row.field_code), int(row.elector_id))
+            for row in baseline.itertuples(index=False)
+        }
+        if baseline is not None and not baseline.empty
+        else set()
+    )
+    new_rows = (
+        projected_all[
+            [
+                (int(field), int(elector)) not in baseline_keys
+                for field, elector in zip(
+                    projected_all["field_code"], projected_all["elector_id"]
+                )
+            ]
+        ]
+        if not projected_all.empty
+        else projected_all
+    )
+
+    if new_rows.empty:
+        st.info(f"Δεν έχει προστεθεί κανένας νέος εκλέκτορας από το {baseline_year}.")
+        return
+
+    labels = {
+        int(row.Code): row.field for row in antikeimena.itertuples(index=False)
+    }
+    meta = _addition_meta(year)
+
+    frame = new_rows.rename(
+        columns={
+            "characterization": external_table.CHARAKTIRISMOS_COL,
+            "reasoning": external_table.REASONING_COL,
+            "elector_id": ID_COL,
+        }
+    ).copy()
+    frame[ID_COL] = frame[ID_COL].astype("int64")
+    frame[FIELD_CODE_COL] = frame["field_code"].astype("int64")
+    frame[FIELD_LABEL_COL] = frame[FIELD_CODE_COL].map(labels).fillna("")
+    for column in (PROPOSAL_STATUS_COL, PROPOSAL_AUTHOR_COL, PROPOSAL_NOTE_COL):
+        frame[column] = [
+            meta.get((int(field), int(elector)), {}).get(column, "")
+            for field, elector in zip(frame[FIELD_CODE_COL], frame[ID_COL])
+        ]
+
+    frame = frame.merge(people, on=ID_COL, how="left")
+    # Names are missing when the registry has no row for the elector, exactly as
+    # in external_table.build — sort on what is actually there.
+    sort_columns = [
+        name
+        for name in (FIELD_CODE_COL, external_table.CHARAKTIRISMOS_COL,
+                     "Επώνυμο", "Όνομα")
+        if name in frame.columns
+    ]
+    frame = frame.sort_values(
+        sort_columns,
+        key=lambda col: (
+            col.ne("ΙΔΙΟΥ")
+            if col.name == external_table.CHARAKTIRISMOS_COL
+            else (fold(col) if col.dtype == object else col)
+        ),
+    ).reset_index(drop=True)
+    frame.insert(0, "α/α", range(1, len(frame) + 1))
+    view = frame[[name for name in ADDITIONS_COLUMNS if name in frame.columns]].fillna("")
+
+    pending_count = int(
+        (view[PROPOSAL_STATUS_COL] == db.PENDING).sum()
+    ) if PROPOSAL_STATUS_COL in view.columns else 0
+    counts = view[external_table.CHARAKTIRISMOS_COL].value_counts()
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Νέοι εκλέκτορες", len(view))
+    col_b.metric("Ιδίου", int(counts.get("ΙΔΙΟΥ", 0)))
+    col_c.metric("Συναφούς", int(counts.get("ΣΥΝΑΦΟΥΣ", 0)))
+    col_d.metric("Αντικείμενα", view[FIELD_CODE_COL].nunique())
+
+    only_pending = st.checkbox(
+        "Μόνο οι εκκρεμείς προσθήκες",
+        value=False,
+        key="additions_pending_only",
+        disabled=not pending_count,
+        help="Οι προσθήκες που δεν έχει εγκρίνει ακόμη ο συντονιστής.",
+    )
+    shown = view[view[PROPOSAL_STATUS_COL] == db.PENDING] if only_pending else view
+
+    st.dataframe(shown, width="stretch", hide_index=True)
+    if pending_count:
+        st.caption(
+            f"{pending_count} από τις {len(view)} προσθήκες εκκρεμούν — δεν "
+            "ισχύουν μέχρι να τις εγκρίνει ο συντονιστής."
+        )
+    st.download_button(
+        "Λήψη Excel",
+        data=_to_excel(shown),
+        file_name=f"external_{year}_νέοι_εκλέκτορες.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="additions_dl",
+    )
+
+
 # The order changes read in, within a subject
 ENTRY_ORDER = [db.REMOVE, db.ADD, db.MODIFY, db.RECHARACTERIZE, db.REJUSTIFY,
                db.REGISTRY_UPDATE]
@@ -842,15 +1007,33 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         year, field_code, subject, registry_by_id, people, fold, marks, blocked
     )
 
+    # The projected year-wide table and the baseline both feed the two sections
+    # below; computed once rather than per section.
+    projected_all = db.working_electors(
+        year, include_pending=True, blocked_ids=blocked
+    )
+    baseline = db.load_external_electors(state["baseline_year"])
+
+    st.divider()
+    st.subheader("Νέοι εκλέκτορες σε όλα τα γνωστικά αντικείμενα")
+    st.caption(
+        f"Όσοι δεν ήταν στον πίνακα του {state['baseline_year']} στο ίδιο "
+        "γνωστικό αντικείμενο, με τα στοιχεία τους από το τρέχον μητρώο ΑΠΕΛΛΑ."
+    )
+    _additions_block(
+        year, state["baseline_year"], projected_all, baseline, antikeimena,
+        people, fold,
+    )
+
     st.divider()
     st.subheader("Συγκεντρωτική αναφορά Word")
     _report_block(
         year,
-        db.working_electors(year, include_pending=True, blocked_ids=blocked),
+        projected_all,
         antikeimena, people, fold, registry_by_id, locked,
         db.auto_removals(year, blocked, include_pending=True),
         changes,
-        db.load_external_electors(state["baseline_year"]),
+        baseline,
     )
 
     if coordinator:
