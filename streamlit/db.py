@@ -1,8 +1,8 @@
 """Postgres access for the μητρώα tables.
 
 Also the single place a connection is made, so the περιγράμματα schema
-(:mod:`perigrammata_db`) is installed and seeded from here too — see
-:func:`get_engine` and :func:`bootstrap`.
+(:mod:`perigrammata_db`) and the Εύδοξος one (:mod:`eudoxus_db`) are installed
+and seeded from here too — see :func:`get_engine` and :func:`bootstrap`.
 
 The database lives on Railway and is reachable **only from inside Railway**
 (no public TCP proxy — see CLAUDE.md, "Database"). Locally and on Streamlit
@@ -175,12 +175,14 @@ def get_engine() -> Engine | None:
     try:
         # Imported here, not at module level: perigrammata_db imports this
         # module for the engine, so a top-level import would be circular.
+        from eudoxus_db import SCHEMA_SQL as EUDOXUS_SCHEMA_SQL
         from perigrammata_db import SCHEMA_SQL as PERIGRAMMATA_SCHEMA_SQL
 
         with engine.begin() as conn:
             conn.execute(text(SCHEMA_SQL))
             conn.execute(text(MIGRATIONS_SQL))
             conn.execute(text(PERIGRAMMATA_SCHEMA_SQL))
+            conn.execute(text(EUDOXUS_SCHEMA_SQL))
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         print(f"[db.get_engine] Αποτυχία εφαρμογής σχήματος: {exc}", flush=True)
     return engine
@@ -203,11 +205,13 @@ def bootstrap() -> str:
     if engine is None:
         return "Χωρίς βάση δεδομένων (δεν έχει οριστεί DATABASE_URL)."
     try:
+        from seed_eudoxus import seed_eudoxus
         from seed_external import seed_historical_years
         from seed_perigrammata import seed_perigrammata
 
         status = seed_historical_years(engine)
         status = f"{status} · {seed_perigrammata(engine)}"
+        status = f"{status} · {seed_eudoxus(engine)}"
         # Report the tables too: without SSH into the container, and with no
         # public proxy to the database, the log line is the only way to confirm
         # a schema change actually landed.

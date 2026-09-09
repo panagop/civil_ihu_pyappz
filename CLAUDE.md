@@ -24,13 +24,17 @@ civil_ihu_pyappz/
 │   ├── perigrammata_db.py            # Περιγράμματα: column spec, schema, load/save/history
 │   ├── seed_perigrammata.py          # Loads files/perigrammata/*.csv into the DB (once)
 │   ├── perigrammata_report.py        # Περιγράμματα Word output (one / all / changes)
+│   ├── eudoxus_client.py             # Unofficial client for service.eudoxus.gr
+│   ├── eudoxus_db.py                 # Εύδοξος: schema, year copy/lock, catalogue
+│   ├── seed_eudoxus.py               # Loads files/eudoxus/* into the DB (once)
 │   ├── pages/
-│   │   ├── 1_📇_perigrammata.py      # Course syllabi (Google Sheets) — login gate ACTIVE
-│   │   ├── 2_📊_mitroa.py            # Course registries — login gate ACTIVE
+│   │   ├── 1_📇_perigrammata (legacy).py  # Syllabi v1 (Google Sheets) — superseded by page 6
+│   │   ├── 2_📊_mitroa (legacy).py        # Registries v1 — superseded by page 5
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
 │   │   ├── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
-│   │   └── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
+│   │   ├── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
+│   │   └── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
 │   └── .streamlit/
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
 ├── scripts/
@@ -43,6 +47,10 @@ civil_ihu_pyappz/
 │   │   ├── perigrammata_gr_2018.csv  # 102 courses (+1 debris row without a code)
 │   │   ├── perigrammata_gr_2025.csv  # 96 courses
 │   │   └── perigrammata_eng_2018.csv # captured, not seeded yet
+│   ├── eudoxus/                      # Εύδοξος — seed input, then archive
+│   │   ├── eudoxus_books_2025-26.xlsx        # the department's export: 291 rows
+│   │   ├── eudoxus_catalogue_20260909.csv    # what Eudoxus said about those 222 books
+│   │   └── eudoxus.py                        # the original standalone script
 │   └── mitroa/                       # Registries — see "Registry data files" below
 │       ├── professors_tables/        # Annual ΑΠΕΛΛΑ exports (.parquet/.feather/.xlsx)
 │       ├── mitroa_by_year/           # Submitted external-elector workbooks (external_<year>.xlsx)
@@ -64,7 +72,7 @@ uv sync           # install all dependencies
 uv sync --extra dev   # include dev tools (pytest, ruff, black)
 ```
 
-Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep), `pandas`, `openpyxl`, `python-docx`, `docxtpl`, `streamlit-calendar`, `pydantic`, `sqlalchemy` + `psycopg[binary]` (Postgres).
+Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep), `pandas`, `openpyxl`, `python-docx`, `docxtpl`, `docxcompose`, `streamlit-calendar`, `pydantic`, `sqlalchemy` + `psycopg[binary]` (Postgres), `requests` (the Eudoxus client — it was always pulled in by Streamlit, now declared).
 
 ## Secrets / credentials
 
@@ -131,7 +139,7 @@ the script writes.
 ## Authentication
 
 > **Active since 2026-09-06.** Microsoft login works in all three environments.
-> Gated: pages 1, 2 and 5 (`require_ihu_login()`). Public: pages 3 and 4 —
+> Gated: pages 1, 2, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3 and 4 —
 > timetables and exam schedules carry no personal data.
 >
 > `st.login()` raises `StreamlitAuthError` where `[auth]` is missing, so never
@@ -204,10 +212,11 @@ in the same project, with a volume. **Deliberately has no public TCP proxy**:
 it is reachable only from inside Railway, over the private network. The app
 service reads it through `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
 
-It holds two unrelated groups of tables: the μητρώα ones described below, and
-the `perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)". Both are
-installed and seeded from [streamlit/db.py](streamlit/db.py), which is the only
-place a connection is made.
+It holds three unrelated groups of tables: the μητρώα ones described below, the
+`perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)" — and the
+`eudoxus_*` ones — see "Εύδοξος (page 7, Postgres)". All are installed and
+seeded from [streamlit/db.py](streamlit/db.py), which is the only place a
+connection is made.
 
 Consequences to keep in mind:
 
@@ -574,6 +583,92 @@ overflows**.
 sheet is exported and committed but not loaded: it writes εξάμηνο as `1st` /
 `2nd`, which needs a mapping before it can enter an INTEGER column. Adding
 `"eng"` there is the easy half.
+
+## Εύδοξος (page 7, Postgres)
+
+The books offered per academic year, and the list for the year being prepared.
+A year is named by the one it starts in: `2025` is «2025-26» (`year_label`).
+Database-only, for the same reason as page 6.
+
+Tables: `eudoxus_years` · `eudoxus_courses` · `eudoxus_selections` ·
+`eudoxus_books` · `eudoxus_changes`, all in
+[streamlit/eudoxus_db.py](streamlit/eudoxus_db.py).
+
+### A new year is a copy, not a replay
+
+The μητρώα tables compute an open year as *baseline + accepted proposals* and
+store nothing until it is finalised. That machinery exists because 52 subjects
+are worked on by many members with no owner. A book list has one teacher per
+course, so `open_year` **copies** the baseline outright and people edit their
+own courses directly, exactly as they edit περιγράμματα. What the coordinator
+reviews is `changes_vs_baseline` — a FULL OUTER JOIN of the two years, so it
+cannot go stale and shows the *net* change; `eudoxus_changes` is the separate
+audit log of who did each edit, including the ones that cancelled out. One year
+is open at a time, and `open_year` refuses a second.
+
+### The εξάμηνο is part of the course key
+
+**ΔΟΜ022 «Οικοδομική ΙΙ» is listed twice** in the 2025-26 export, once as 7th
+εξάμηνο and once as 9th — the old programme running beside the new one — with
+the same three books in a *different* priority order (0/1/2 vs 0/2/1). So
+`eudoxus_courses` is keyed on `(year, course_code, examino)` and
+`eudoxus_selections` on `(year, course_code, examino, book_id)`. Keying on the
+course code alone silently loses one of the two orderings.
+
+The list also spans **both** curricula: of its 101 courses, 83 are in the 2025
+περιγράμματα and the other 18 only in the 2018 ones. Do not assume a book list
+maps onto one πρόγραμμα σπουδών.
+
+### `eudoxus_books` — the catalogue cache
+
+Book metadata is **not** in `eudoxus_selections`: a book appears in several
+courses (222 distinct books over 291 rows) and its availability changes on
+Eudoxus' side, not ours. `found` distinguishes "withdrawn from the registry"
+from "this code is not in the registry at all" — different problems for whoever
+has to fix the list.
+
+- **A book that has never been checked is not reported as a problem.** Absence
+  of an answer is not a negative one; the page counts those separately.
+- **`active` and `selectable` are different flags and both matter.** Of the 9
+  problem books found on 2026-09-09, 4 are `active=True, selectable=False` —
+  checking only `active` would have missed them.
+- Type coercion in `_clean_book` is not decoration: ISBNs arrive as **integers**
+  from both the JSON and pandas, and Postgres has no assignment cast from
+  bigint to text, so an uncoerced one fails the INSERT. numpy scalars out of a
+  DataFrame are the same class of problem — psycopg cannot adapt them at all.
+
+### The Eudoxus client
+
+[streamlit/eudoxus_client.py](streamlit/eudoxus_client.py) is an **unofficial,
+reverse-engineered** client for the JSON endpoint behind the public
+[Σύνθετη Αναζήτηση](https://service.eudoxus.gr/search/#/advanced) page. There is
+no published contract:
+
+- `PUT /search/rest/app/advanced-search`, and **unknown keys are rejected with
+  HTTP 500** — send only fields in `_TEMPLATE`.
+- `id` is an exact match on a single code and **there is no bulk endpoint**, so
+  checking a year is inherently one request per book: ~1 s each, ~3.5 minutes
+  for 222. That is why results are stored rather than fetched per page view,
+  and why the check runs behind a button with a progress bar.
+- `fetch_books` never raises — a dead code comes back `found=False` with the
+  reason, so one bad book cannot abort a check of two hundred.
+
+It grew out of [files/eudoxus/eudoxus.py](files/eudoxus/eudoxus.py), which stays
+where it was written as a standalone script.
+
+### Seed data
+
+`files/eudoxus/eudoxus_books_2025-26.xlsx` is the department's own export
+(291 rows → 102 course offerings, 291 selections) and
+`eudoxus_catalogue_<YYYYMMDD>.csv` is a one-off dump of what Eudoxus said about
+each of those 222 books, fetched once so the browse tab shows titles rather
+than bare numeric codes from the first run.
+
+This is the **only** import: from the next year on a list is opened as a copy
+and edited in the app. The catalogue is loaded **only while the table is
+empty** — after that the availability check owns it, and re-applying the dump
+on every restart would replace a fresh answer with a stale one. Seeded years are
+inserted as `ΚΛΕΙΔΩΜΕΝΟ`.
 
 ## Active data files
 

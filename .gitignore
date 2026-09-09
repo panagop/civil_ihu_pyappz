@@ -157,3 +157,6 @@ keys.json
 
 .streamlit/
 secrets.toml
+
+# Office lock files (created while a workbook is open)
+~$*
