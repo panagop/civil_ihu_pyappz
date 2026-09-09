@@ -1,5 +1,9 @@
 """Postgres access for the μητρώα tables.
 
+Also the single place a connection is made, so the περιγράμματα schema
+(:mod:`perigrammata_db`) is installed and seeded from here too — see
+:func:`get_engine` and :func:`bootstrap`.
+
 The database lives on Railway and is reachable **only from inside Railway**
 (no public TCP proxy — see CLAUDE.md, "Database"). Locally and on Streamlit
 Cloud there is no ``DATABASE_URL``, so :func:`get_engine` returns ``None`` and
@@ -169,9 +173,14 @@ def get_engine() -> Engine | None:
     # migration that silently does not happen. This function is cached, so the
     # DDL runs once per process, and it is cheap and idempotent.
     try:
+        # Imported here, not at module level: perigrammata_db imports this
+        # module for the engine, so a top-level import would be circular.
+        from perigrammata_db import SCHEMA_SQL as PERIGRAMMATA_SCHEMA_SQL
+
         with engine.begin() as conn:
             conn.execute(text(SCHEMA_SQL))
             conn.execute(text(MIGRATIONS_SQL))
+            conn.execute(text(PERIGRAMMATA_SCHEMA_SQL))
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         print(f"[db.get_engine] Αποτυχία εφαρμογής σχήματος: {exc}", flush=True)
     return engine
@@ -195,8 +204,10 @@ def bootstrap() -> str:
         return "Χωρίς βάση δεδομένων (δεν έχει οριστεί DATABASE_URL)."
     try:
         from seed_external import seed_historical_years
+        from seed_perigrammata import seed_perigrammata
 
         status = seed_historical_years(engine)
+        status = f"{status} · {seed_perigrammata(engine)}"
         # Report the tables too: without SSH into the container, and with no
         # public proxy to the database, the log line is the only way to confirm
         # a schema change actually landed.

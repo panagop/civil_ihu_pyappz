@@ -21,12 +21,16 @@ civil_ihu_pyappz/
 │   ├── external_table.py             # THE submitted table's layout + registry join
 │   ├── external_report.py            # Consolidated Word report (landscape A4)
 │   ├── proposals_ui.py               # "Προετοιμασία <έτους>" tab — the only writing UI
+│   ├── perigrammata_db.py            # Περιγράμματα: column spec, schema, load/save/history
+│   ├── seed_perigrammata.py          # Loads files/perigrammata/*.csv into the DB (once)
+│   ├── perigrammata_report.py        # Περιγράμματα Word output (one / all / changes)
 │   ├── pages/
-│   │   ├── 1_📇_perigrammata.py      # Course syllabi — login gate ACTIVE
+│   │   ├── 1_📇_perigrammata.py      # Course syllabi (Google Sheets) — login gate ACTIVE
 │   │   ├── 2_📊_mitroa.py            # Course registries — login gate ACTIVE
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
-│   │   └── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
+│   │   ├── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
+│   │   └── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
 │   └── .streamlit/
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
 ├── scripts/
@@ -35,6 +39,10 @@ civil_ihu_pyappz/
 ├── files/
 │   ├── exams/                        # Exam Excel files (.xlsm); active: exams-2026-06.xlsm
 │   ├── timetables/                   # Timetable Excel files (.xlsm); active: 2025-2026.xlsm
+│   ├── perigrammata/                 # Frozen Google Sheets export — seed input, then archive
+│   │   ├── perigrammata_gr_2018.csv  # 102 courses (+1 debris row without a code)
+│   │   ├── perigrammata_gr_2025.csv  # 96 courses
+│   │   └── perigrammata_eng_2018.csv # captured, not seeded yet
 │   └── mitroa/                       # Registries — see "Registry data files" below
 │       ├── professors_tables/        # Annual ΑΠΕΛΛΑ exports (.parquet/.feather/.xlsx)
 │       ├── mitroa_by_year/           # Submitted external-elector workbooks (external_<year>.xlsx)
@@ -196,6 +204,11 @@ in the same project, with a volume. **Deliberately has no public TCP proxy**:
 it is reachable only from inside Railway, over the private network. The app
 service reads it through `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
 
+It holds two unrelated groups of tables: the μητρώα ones described below, and
+the `perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)". Both are
+installed and seeded from [streamlit/db.py](streamlit/db.py), which is the only
+place a connection is made.
+
 Consequences to keep in mind:
 
 - **You cannot connect from a developer machine or from Streamlit Cloud.**
@@ -204,7 +217,9 @@ Consequences to keep in mind:
 - Locally and on Streamlit Cloud there is no `DATABASE_URL`, so
   `db.get_engine()` returns `None`. Every DB-backed feature **must degrade, not
   crash** — the file-backed tabs of page 5 keep working in all three
-  environments.
+  environments. Page 6 degrades by *stopping* with a message: its file source
+  is a pre-handover archive, so falling back to it would serve stale
+  περιγράμματα rather than none.
 - Because nothing outside Railway can seed it, the schema and the historical
   data are installed **by the app itself**, in two places on purpose:
   - **Schema and migrations** run inside `db.get_engine()`. **Not** in
@@ -465,6 +480,101 @@ workbook is hand-typed in caps), 334 are the known Κατηγορία Χρήστ
 joined to), and ~100 are real drift in Βαθμίδα, ΦΕΚ and Σχολή. The database view
 shows the **official registry values**; the file view shows what was typed.
 
+## Περιγράμματα (page 6, Postgres)
+
+Page 1 reads the Google Sheet and **keeps working** — leave it alone until
+explicitly told to remove it. Page 6 is its replacement and never touches the
+sheet.
+
+The sheet was exported once, on 2026-09-09, into `files/perigrammata/` and the
+database is the master from that point. That export is the *only* thing that
+reads those CSVs — after the first successful seed they are the historical
+record of what the sheet held at handover, exactly as `external_<year>.xlsx`
+is for the μητρώα. **Page 6 does not fall back to them**: with no
+`DATABASE_URL` it stops with a message, because a page quietly serving
+pre-handover data is worse than a page that says it cannot run. That does mean
+page 6 works **only on Railway** until a local Postgres exists (see the
+backlog).
+
+All three worksheets (`gr`, `gr_2025`, `eng`) carry identical column names, so
+it is one table with `(curriculum, locale, code)` as the key. `eng` matched the
+2018 curriculum exactly (102 of its 103 codes), so English is a *locale*, not a
+separate programme.
+
+### `perigrammata_courses`
+
+One row per course. The 39 content columns are generated into the DDL from
+`CONTENT_COLUMNS` in [streamlit/perigrammata_db.py](streamlit/perigrammata_db.py),
+so the table, the edit form, the Word context and the seeder cannot drift apart
+— add a column there and everything follows. `FIELD_GROUPS` in the same file
+carries the Greek label and the widget kind for each, so a new column cannot be
+added without deciding how it is edited.
+
+- **`locale`, not `lang`.** `lang` is already a *content* column: the language
+  the course is taught in («Ελληνική»). Two different things, and calling both
+  `lang` would have been a bug waiting to happen.
+- **Numerics are stored as numbers** (`examino` INTEGER, hours/ects NUMERIC) so
+  εξάμηνο can be charted and the workload summed. Every value in both years is
+  a whole number, and `perigrammata_report.format_value` prints them as such —
+  page 1 rendered `4.0` into Word where the sheet said `4`.
+- **`sort_order`** is the sheet's old `id`. It is row order within a worksheet,
+  not an identity; it survives only so the full report prints in the order
+  people are used to.
+- **2018 is read-only** (`EDITABLE_CURRICULUM = 2025`), enforced in
+  `save_course`, not just hidden in the UI.
+- `refs_more_title` / `refs_more` exist in every worksheet but in **neither Word
+  template**. They are stored and editable and simply do not print; the Word tab
+  says so when a course has them. Dropping them on import would have lost data.
+
+### `perigrammata_revisions`
+
+Append-only, one row per save: `data` is the full new state, `changes` is only
+the fields that moved. Both, deliberately — `data` makes a course recoverable,
+`changes` makes the coordinator's report a read rather than a diff of
+consecutive snapshots.
+
+**No proposals workflow here, unlike μητρώα.** That machinery exists because 52
+subjects are worked on by many members with no owner and Streamlit locks
+nothing. A περίγραμμα has one natural owner per course, so anyone who passes
+the login gate edits directly and the history carries the accountability. The
+one concurrency guard is optimistic: the form remembers the `updated_at` it
+rendered from and the UPDATE matches on it, so a second tab that loaded earlier
+fails loudly instead of silently overwriting.
+
+The seed writes an origin revision per course with an **empty `changes`
+object**, so the initial import is recoverable but never shows up as 198
+courses "changed" on the day the database was filled.
+
+### Word output
+
+[streamlit/perigrammata_report.py](streamlit/perigrammata_report.py), three
+documents:
+
+- `render_course` — one περίγραμμα, from the same `docxtpl` template as page 1
+  but read from `files/` instead of fetched from GitHub on every click.
+- `build_full_report` — every course, one per page, merged with `docxcompose`.
+  ~10 s for the 96 courses of 2025, so it sits behind a button, a spinner, and a
+  cache keyed on the newest `updated_at`. Each course is rendered separately and
+  the results merged because the template is a whole-page form and `docxtpl`
+  cannot repeat one.
+- `build_changes_report` — what moved in a period, grouped by course, read
+  straight out of `perigrammata_revisions`. Not derivable from the courses
+  table, which only ever holds the present. Values are truncated to 400
+  characters: `subject1` alone runs to 4.583, and printed in full one edit would
+  bury every other change.
+
+Column widths total 27.6 cm against the 27.7 cm usable on landscape A4 — the
+same trap as the μητρώα report, where **Word ignores every width if the total
+overflows**.
+
+### English, deferred
+
+`SEED_LOCALES = ("gr",)` in
+[streamlit/seed_perigrammata.py](streamlit/seed_perigrammata.py). The English
+sheet is exported and committed but not loaded: it writes εξάμηνο as `1st` /
+`2nd`, which needs a mapping before it can enter an INTEGER column. Adding
+`"eng"` there is the easy half.
+
 ## Active data files
 
 Update these paths inside the page files when switching academic year:
@@ -547,6 +657,15 @@ These are planned refactors (no functionality changes):
 3. **Replace magic strings with constants** — column names, time slots, file paths.
 4. **Add smoke tests** for document generation.
 5. **Move active file paths to a config section** so year updates are a single-line change.
+6. **Local Postgres for development (agreed 2026-09-09, deferred).** Every
+   DB-backed feature — the μητρώα tables *and* the new περιγράμματα ones — can
+   only be exercised on Railway, which makes the edit form on page 6 and any
+   schema change a push-and-read-the-log affair. `settings.get_secret` already
+   falls back to environment variables, so a throwaway Postgres (Docker, or any
+   local install) plus `DATABASE_URL` is enough: `get_engine` installs both
+   schemas and `bootstrap` seeds from the committed files, giving a full local
+   copy with no access to production data. Nothing in the code needs to change
+   — this is a dev-setup task, and worth doing before the next schema change.
 
 ## Notes
 
