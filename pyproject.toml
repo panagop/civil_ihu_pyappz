@@ -35,6 +35,7 @@ dev = [
     "black",
     "ruff",
     "jupyter",
+    "pgserver>=0.1.4",
 ]
 
 [tool.hatch.build.targets.wheel]

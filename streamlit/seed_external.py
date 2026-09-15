@@ -6,8 +6,9 @@ there. It is idempotent: a year that already has rows is skipped, and the
 inserts themselves are ``ON CONFLICT DO NOTHING``.
 
 Only the three columns that are *decisions* are stored (characterisation,
-reasoning, and who/where). Everything else in the workbook is a copy of that
-year's ΑΠΕΛΛΑ export and is joined back in at display time.
+reasoning, and who/where) — in ``mitroa_external_electors``. Everything else
+in the workbook is a copy of that year's ΑΠΕΛΛΑ export and is joined back in at
+display time.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ VALID_CHARACTERIZATIONS = {"ΙΔΙΟΥ", "ΣΥΝΑΦΟΥΣ"}
 
 INSERT_SQL = text(
     """
-    INSERT INTO external_electors
+    INSERT INTO mitroa_external_electors
         (year, field_code, elector_id, characterization, reasoning)
     VALUES (:year, :field_code, :elector_id, :characterization, :reasoning)
     ON CONFLICT (year, field_code, elector_id) DO NOTHING
@@ -115,7 +116,10 @@ def seed_historical_years(engine: Engine) -> str:
 
         with engine.connect() as conn:
             already = conn.execute(
-                text("SELECT 1 FROM external_electors WHERE year = :year LIMIT 1"),
+                text(
+                    "SELECT 1 FROM mitroa_external_electors "
+                    "WHERE year = :year LIMIT 1"
+                ),
                 {"year": year},
             ).first()
         if already:

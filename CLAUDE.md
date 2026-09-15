@@ -17,7 +17,7 @@ civil_ihu_pyappz/
 │   ├── auth.py                       # OIDC gate helpers (require_ihu_login, render_login_block)
 │   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
-│   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
+│   ├── seed_external.py              # Loads external_<year>.xlsx into mitroa_external_electors
 │   ├── external_table.py             # THE submitted table's layout + registry join
 │   ├── external_report.py            # Consolidated Word report (landscape A4)
 │   ├── proposals_ui.py               # "Προετοιμασία <έτους>" tab — the only writing UI
@@ -55,6 +55,7 @@ civil_ihu_pyappz/
 │   │   ├── eudoxus_catalogue_20260909.csv    # what Eudoxus said about those 222 books
 │   │   └── eudoxus.py                        # the original standalone script
 │   └── mitroa/                       # Registries — see "Registry data files" below
+│       ├── db_backups/           # CSV zips downloaded from the app (see "Table names")
 │       ├── professors_tables/        # Annual ΑΠΕΛΛΑ exports (.parquet/.feather/.xlsx)
 │       ├── mitroa_by_year/           # Submitted external-elector workbooks (external_<year>.xlsx)
 │       ├── antikeimena.csv           # The 52 γνωστικά αντικείμενα (Code, field, domain)
@@ -62,7 +63,7 @@ civil_ihu_pyappz/
 │       └── json2024/, json2025/      # Older JSON exports
 ├── jupyter/                          # Exploration notebooks (not part of app)
 ├── plans/                            # Implementation plans (markdown)
-├── tests/                            # Minimal tests (pytest)
+├── tests/                            # pytest; test_db_rename.py runs an embedded Postgres
 └── pyproject.toml                    # Dependencies — managed with uv
 ```
 
@@ -217,7 +218,7 @@ in the same project, with a volume. **Deliberately has no public TCP proxy**:
 it is reachable only from inside Railway, over the private network. The app
 service reads it through `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
 
-It holds three unrelated groups of tables: the μητρώα ones described below, the
+It holds three unrelated groups of tables: the `mitroa_*` ones described below, the
 `perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)" — and the
 `eudoxus_*` ones — see "Εύδοξος (page 7, Postgres)". All are installed and
 seeded from [streamlit/db.py](streamlit/db.py), which is the only place a
@@ -254,18 +255,30 @@ Consequences to keep in mind:
   `MIGRATIONS_SQL`, written to be safe on every start (`DROP CONSTRAINT IF
   EXISTS` then `ADD CONSTRAINT`).
 
-### Pending: rename the three tables (agreed 2026-09-06, deferred)
+### Table names (renamed 2026-09-15)
 
-`external_electors` → `mitroo_electors`, `year_status` → `mitroo_years`,
-`proposals` → `mitroo_proposals`, so a future admin session's `\dt` shows the
-app's tables as a group. **Not yet applied** — members are working on the 2026
-tables and this is not a change to make under them; do it once 2026 is
-finalised. The renames must run **before** `SCHEMA_SQL`, not in
-`MIGRATIONS_SQL`, or the app silently starts against three empty tables. Read
-[plans/rename-mitroa-tables.md](plans/rename-mitroa-tables.md) before touching
-this.
+The three μητρώα tables were created as `external_electors`, `year_status`
+and `proposals` and renamed to `mitroa_external_electors`,
+`mitroa_year_status` and `mitroa_proposals` once the 2026 year was locked, so
+that a future admin session's `\dt` shows the app's tables as three groups
+(`mitroa_*`, `perigrammata_*`, `eudoxus_*`). `db._rename_legacy_tables` does it
+on start, **before** `SCHEMA_SQL` and in the same transaction — run after it,
+`CREATE TABLE IF NOT EXISTS` would create three empty tables under the new
+names and the app would silently start against them. It also renames the
+constraints, indexes and the `proposals_id_seq` sequence, which `ALTER TABLE …
+RENAME` leaves alone, and prints `[db.get_engine] Μετονομάστηκαν πίνακες: …`
+to the deployment log. Before renaming, each table is copied verbatim to
+`mitroa_backup_20260915_<old name>`: nothing outside Railway can take a backup,
+so the snapshot lives in the database until it has been downloaded.
 
-### `external_electors`
+**Backups leave the database through the app.** The coordinator section of
+the «Προετοιμασία <έτους>» tab has «Αντίγραφο ασφαλείας της βάσης (CSV)»
+(`db.backup_archive`): every `mitroa_*` table as a CSV in one zip. Commit the
+download under `files/mitroa/db_backups/`; once the 2026-09-15 snapshot is
+committed, the `mitroa_backup_*` copies can be dropped (see
+[plans/rename-mitroa-tables.md](plans/rename-mitroa-tables.md)).
+
+### `mitroa_external_electors`
 
 One row per (year, γνωστικό αντικείμενο, elector) — see [streamlit/db.py](streamlit/db.py):
 
@@ -313,13 +326,13 @@ export are kept with blank columns and counted in a warning, never dropped.
 A year under preparation is **never stored as rows** while it is open. Its table
 is computed on read as *baseline year + accepted proposals*
 (`db.working_electors`); only `db.finalize_year` writes it into
-`external_electors`. So `external_electors` always means "officially approved",
+`mitroa_external_electors`. So `mitroa_external_electors` always means "officially approved",
 and the page-5 tab and the Word report need no notion of drafts.
 
-- `year_status(year, status, baseline_year, …)` — `ΑΝΟΙΧΤΟ` → `ΚΛΕΙΔΩΜΕΝΟ`.
+- `mitroa_year_status(year, status, baseline_year, …)` — `ΑΝΟΙΧΤΟ` → `ΚΛΕΙΔΩΜΕΝΟ`.
   `db.open_year(2026, baseline_year=2025, …)` copies nothing; it just records
   the baseline.
-- `proposals` — one row per proposed change: `ΠΡΟΣΘΗΚΗ` / `ΑΦΑΙΡΕΣΗ` /
+- `mitroa_proposals` — one row per proposed change: `ΠΡΟΣΘΗΚΗ` / `ΑΦΑΙΡΕΣΗ` /
   `ΜΕΤΑΒΟΛΗ` (carries the new characterisation *and* the new justification, so
   changing both stays one decision a coordinator cannot half-accept; the older
   split `ΧΑΡΑΚΤΗΡΙΣΜΟΣ` / `ΑΙΤΙΟΛΟΓΗΣΗ` still replay), with a mandatory `note`,
@@ -401,7 +414,7 @@ look at, and the report prints them with `AUTO_REMOVAL_NOTE` ("Διαγραφή 
 themselves, with their own justification.
 
 The report's change table has **three sources**, because each leaves a different
-trace: proposals (a row in `proposals`), automatic removals (no row at all), and
+trace: proposals (a row in `mitroa_proposals`), automatic removals (no row at all), and
 **registry updates** — βαθμίδα, φορέας, γνωστικό αντικείμενο moving between the
 baseline year's export and the current one (`registry_changes`, action
 `ΕΝΗΜΕΡΩΣΗ`). The last are not changes to the list, but they *are* changes to
@@ -812,15 +825,16 @@ These are planned refactors (no functionality changes):
 3. **Replace magic strings with constants** — column names, time slots, file paths.
 4. **Add smoke tests** for document generation.
 5. **Move active file paths to a config section** so year updates are a single-line change.
-6. **Local Postgres for development (agreed 2026-09-09, deferred).** Every
-   DB-backed feature — the μητρώα tables *and* the new περιγράμματα ones — can
-   only be exercised on Railway, which makes the edit form on page 6 and any
-   schema change a push-and-read-the-log affair. `settings.get_secret` already
-   falls back to environment variables, so a throwaway Postgres (Docker, or any
-   local install) plus `DATABASE_URL` is enough: `get_engine` installs both
-   schemas and `bootstrap` seeds from the committed files, giving a full local
-   copy with no access to production data. Nothing in the code needs to change
-   — this is a dev-setup task, and worth doing before the next schema change.
+6. **Local Postgres for development (agreed 2026-09-09, half done).** The
+   tests have one: `pgserver` (dev extra) bundles Postgres binaries and
+   [tests/test_db_rename.py](tests/test_db_rename.py) starts a throwaway
+   instance in a temp directory, so schema changes are no longer a
+   push-and-read-the-log affair — copy its `database` fixture for the next
+   one. Running the *app* against a local Postgres is still not set up:
+   `settings.get_secret` falls back to environment variables, so any local
+   Postgres plus `DATABASE_URL` is enough — `get_engine` installs all three
+   schemas and `bootstrap` seeds from the committed files, a full local copy
+   with no access to production data.
 
 ## Notes
 
