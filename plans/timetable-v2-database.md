@@ -7,8 +7,8 @@ reference from here on.
 
 Decisions taken with the answers: Λιαλιαμπής and Παπαϊωάννου are former ΔΕΠ
 who still teach (filed as ΔΕΠ); «Εργαστήριο Τεχνικού Σχεδίου Ι» is the one
-drawing lab; in 2026-27 εξάμηνα 1–2 follow the 2025 programme and 3–10 the
-2018 one; Θ over Ε of the same course is a conflict; only `coordinator_emails`
+drawing lab; in 2026-27 εξάμηνα 1–4 follow the 2025 programme and 5–10 the
+2018 one (corrected from 1–2 after the first review); Θ over Ε of the same course is a conflict; only `coordinator_emails`
 edit; form-based editing; whole hours only; the 2025-26 workbook is seeded as
 two locked terms and `2026-2027.xlsm` stays on disk unseeded until the
 approach is confirmed. Added after seeing the data: electives of disjoint

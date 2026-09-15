@@ -745,9 +745,16 @@ already many-to-one in the data (ΓΕΝ002 has two instructors, ΔΟΜ011 two ro
 `course_code`, and `load_term` joins `perigrammata_courses` — so the seed must
 run after the περιγράμματα one. The curriculum is stored rather than guessed
 because the department is mid-transition: `NEW_CURRICULUM_EXAMINA` says which
-εξάμηνα follow the 2025 programme in each year (2025-26 and 2026-27: only the
-first year, εξάμηνα 1–2; everything else 2018 — decided 2026-09-15). Extend it
-when the next year moves over. `candidate_courses` uses the same rule to list
+εξάμηνα follow the 2025 programme in each year: 2025-26 the first year only
+(εξάμηνα 1–2), 2026-27 the first two (1–4), everything else 2018 — one year of
+study moves over per year (corrected 2026-09-15). Extend it when the next
+year moves over. `open_term` re-resolves the curriculum of every copied row
+by the rule of the *new* year — but only where that programme has the code
+**in the same εξάμηνο** (ΔΟΜ007 is 3rd in 2018 and 4th in 2025, so it must not
+flip) — so last winter's 3rd-εξάμηνο rows become 2025 rows in 2026-27 where
+they can. The rest keep their old curriculum and `off_programme` lists them in
+the Προετοιμασία tab for the coordinator to replace; nothing is dropped
+silently. `candidate_courses` uses the same rule to list
 what the programme offers for a period. ΔΟΜ004 sits in the 2nd εξάμηνο but is
 not in the 2025 programme; the seed falls back to 2018 for such codes and says
 so in the log.

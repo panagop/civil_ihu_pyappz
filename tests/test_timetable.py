@@ -62,8 +62,9 @@ def test_name_suffix():
 
 def test_curriculum_rule():
     assert tdb.curriculum_for(2026, 1) == 2025
-    assert tdb.curriculum_for(2026, 2) == 2025
-    assert tdb.curriculum_for(2026, 3) == 2018
+    assert tdb.curriculum_for(2026, 4) == 2025
+    assert tdb.curriculum_for(2026, 5) == 2018
+    assert tdb.curriculum_for(2025, 3) == 2018
     assert tdb.curriculum_for(2024, 1) == 2018
     assert tdb.period_for(1) == tdb.WINTER and tdb.period_for(8) == tdb.SPRING
 
@@ -218,6 +219,20 @@ def test_open_copy_edit_and_lock(database):
     assert len(copied) == len(original)
     assert copied["instructors"].tolist() == original["instructors"].tolist()
     assert copied["room_codes"].tolist() == original["room_codes"].tolist()
+    # 2026-27 runs the 2025 programme in εξάμηνα 1–4: the copied 3rd-εξάμηνο
+    # rows move to it where the code exists there, and their names resolve.
+    third = copied[copied["examino"] == 3]
+    assert (third["curriculum"] == 2025).any()
+    assert not (third["course_name"] == "(άγνωστο μάθημα)").any()
+    assert (copied[copied["examino"] >= 5]["curriculum"] == 2018).all()
+    # ΔΟΜ007 is 3rd in 2018 but 4th in 2025: it must not be re-resolved, and
+    # it is reported as off-programme together with the codes 2025 lacks.
+    dom007 = third[third["course_code"] == "ΔΟΜ007"]
+    assert (dom007["curriculum"] == 2018).all()
+    stale = tdb.off_programme(copied, 2026)
+    assert set(stale["course_code"]) >= {"ΔΟΜ007", "ΔΟΜ006", "ΔΟΜ008", "ΥΔΡ001"}
+    assert (stale["examino"] == 3).all()
+    assert tdb.off_programme(tdb.load_term(2025, tdb.WINTER), 2025).empty
     # The copy carries last winter's activity
     active = tdb.staff_for_term(2026, tdb.WINTER)
     assert bool(active[active["short_name"] == "Κίρτας"]["active"].iloc[0])
@@ -251,8 +266,8 @@ def test_open_copy_edit_and_lock(database):
 
     candidates = tdb.candidate_courses(2026, tdb.WINTER)
     assert set(candidates["examino"].unique()) <= {1, 3, 5, 7, 9}
-    assert (candidates[candidates["examino"] == 1]["curriculum"] == 2025).all()
-    assert (candidates[candidates["examino"] >= 3]["curriculum"] == 2018).all()
+    assert (candidates[candidates["examino"] <= 4]["curriculum"] == 2025).all()
+    assert (candidates[candidates["examino"] >= 5]["curriculum"] == 2018).all()
 
     assert tdb.lock_term(2026, tdb.WINTER, "c@ihu.gr") == ""
     assert not tdb.open_terms()

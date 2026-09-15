@@ -347,6 +347,20 @@ with tab_prepare:
     summary["Χωρίς ώρα"] = summary["Γραμμές"] - summary["Με ώρα"]
     st.dataframe(summary, width="stretch")
 
+    stale = tdb.off_programme(df, year)
+    if not stale.empty:
+        st.warning(
+            f"{len(stale)} γραμμές ανήκουν σε πρόγραμμα σπουδών διαφορετικό από αυτό που "
+            "ακολουθεί το εξάμηνό τους φέτος (μεταφέρθηκαν από πέρυσι). "
+            "Αντικαταστήστε τις με τα μαθήματα του σωστού προγράμματος."
+        )
+        st.dataframe(
+            stale[["examino", "curriculum", "course_code", "display_name", "section", "day", "start_time"]]
+            .rename(columns={**DISPLAY_COLUMNS, "curriculum": "Πρόγραμμα"}),
+            width="stretch",
+            hide_index=True,
+        )
+
     if not coordinator:
         st.info("Οι αλλαγές γίνονται από τους συντονιστές (`coordinator_emails`).")
     elif not editable:

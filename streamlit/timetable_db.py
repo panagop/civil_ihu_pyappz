@@ -78,12 +78,13 @@ OPENED, LOCKED_ACTION = "ΑΝΟΙΓΜΑ", "ΚΛΕΙΔΩΜΑ"
 ACTIONS = (ADD, MODIFY, DELETE, OPENED, LOCKED_ACTION)
 
 # Which εξάμηνα follow the 2025 programme in a given academic year; the rest
-# follow 2018. The department is mid-transition: in 2025-26 and 2026-27 only
-# the first year runs on the new programme (decided 2026-09-15). Extend the
-# tuple when the next year moves over. Years not listed are entirely 2018.
+# follow 2018. The department is mid-transition, one year of study per year:
+# 2025-26 ran the new programme in the first year only, 2026-27 runs it in the
+# first two (εξάμηνα 1–4; corrected 2026-09-15). Extend the tuple when the
+# next year moves over. Years not listed are entirely 2018.
 NEW_CURRICULUM_EXAMINA: dict[int, tuple[int, ...]] = {
     2025: (1, 2),
-    2026: (1, 2),
+    2026: (1, 2, 3, 4),
 }
 OLD_CURRICULUM, NEW_CURRICULUM = 2018, 2025
 
@@ -299,7 +300,25 @@ def open_term(
                 params,
             )
         ]
+        # A copied row follows the programme its εξάμηνο runs on in the *new*
+        # year, where that programme has the code *in the same εξάμηνο*: the
+        # transition moves one year of study forward each year, so last
+        # winter's 3rd-εξάμηνο rows (2018) become 2025 rows in 2026-27. The
+        # εξάμηνο must match because 84 codes are shared between programmes
+        # with different content and sometimes a different εξάμηνο (ΔΟΜ007 is
+        # 3rd in 2018, 4th in 2025). Anything else keeps its old curriculum and
+        # is listed by the page as belonging to the old programme.
+        known = {
+            (row[0], row[1]): row[2]
+            for row in conn.execute(
+                text(
+                    f"SELECT curriculum, code, examino FROM {PERIGRAMMATA_TABLE} "
+                    "WHERE locale = 'gr'"
+                )
+            )
+        }
         mapping: dict[int, int] = {}
+        moved = 0
         for old_id in old_ids:
             new_id = conn.execute(
                 text(
@@ -313,6 +332,17 @@ def open_term(
                 {**params, "old_id": old_id},
             ).scalar_one()
             mapping[old_id] = new_id
+            examino, code, curriculum = conn.execute(
+                text(f"SELECT examino, course_code, curriculum FROM {CLASSES_TABLE} WHERE id = :id"),
+                {"id": new_id},
+            ).one()
+            wanted = curriculum_for(year, examino)
+            if wanted != curriculum and known.get((wanted, code)) == examino:
+                conn.execute(
+                    text(f"UPDATE {CLASSES_TABLE} SET curriculum = :c WHERE id = :id"),
+                    {"c": wanted, "id": new_id},
+                )
+                moved += 1
         for old_id, new_id in mapping.items():
             conn.execute(
                 text(
@@ -342,7 +372,8 @@ def open_term(
         )
         _log(
             conn, year, period, None, OPENED,
-            f"Αντιγραφή από {term_label(baseline_year, baseline_period)} ({len(mapping)} γραμμές)",
+            f"Αντιγραφή από {term_label(baseline_year, baseline_period)} ({len(mapping)} γραμμές"
+            + (f", {moved} στο πρόγραμμα 2025)" if moved else ")"),
             opened_by,
         )
     return ""
@@ -768,6 +799,22 @@ def _describe(course_code, section, day, start_hour, duration) -> str:
 # --------------------------------------------------------------------------
 # Candidate courses for the arranging tab
 # --------------------------------------------------------------------------
+
+def off_programme(frame: pd.DataFrame, year: int) -> pd.DataFrame:
+    """Rows whose curriculum is not the one their εξάμηνο runs on in ``year``.
+
+    After a copy across the transition these are last year's courses of an
+    εξάμηνο that has since moved to the 2025 programme — to be replaced by the
+    coordinator, not silently.
+    """
+    if frame.empty:
+        return frame
+    mask = [
+        int(curriculum) != curriculum_for(year, int(examino))
+        for curriculum, examino in zip(frame["curriculum"], frame["examino"])
+    ]
+    return frame[mask]
+
 
 def candidate_courses(year: int, period: str) -> pd.DataFrame:
     """Courses of the period's εξάμηνα, from the curriculum each one follows.
