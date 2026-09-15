@@ -122,6 +122,22 @@ def test_conflicts():
     assert len(found) == 10
 
 
+def test_optional_text_columns_are_never_nan():
+    """A NULL must reach the edit form as "", not as NaN.
+
+    `NaN or ""` keeps the NaN — NaN is truthy — so an unfilled «Ένδειξη μετά
+    τον τίτλο» rendered the literal «nan» in the text input.
+    """
+    frame = _frame([(1, 1, "A", "Θ", 1, 9, 2, ["301"], [1])])
+    for column in tdb.OPTIONAL_TEXT_COLUMNS:
+        assert frame[column].iloc[0] == ""
+        assert not pd.isna(frame[column].iloc[0])
+    assert frame["display_name"].iloc[0] == "A"
+
+    with_suffix = _frame([(1, 1, "A", "Θ", 1, 9, 2, ["301"], [1], "ΔΥ, ΥΕ")])
+    assert with_suffix["display_name"].iloc[0] == "A (ΔΥ, ΥΕ)"
+
+
 def test_streams():
     assert tdb.streams("ΥΥ, ΔΕ") == {"Υ", "Δ"}
     assert tdb.streams(None) == frozenset()
@@ -189,6 +205,9 @@ def test_seed_makes_two_locked_terms(database):
     # Suffix printed after the name
     dom022 = winter[winter["course_code"] == "ΔΟΜ022"].iloc[0]
     assert dom022["display_name"] == "Οικοδομική ΙΙ (ΔΥ, ΣΕ, ΥΕ)"
+    # A course with no marker and no note reads back as empty strings, not NaN
+    gen001 = winter[winter["course_code"] == "ΓΕΝ001"].iloc[0]
+    assert gen001["name_suffix"] == "" and gen001["notes"] == ""
     # Seeding is idempotent
     assert "υπήρχαν ήδη" in seed.seed_timetable(db.get_engine())
 

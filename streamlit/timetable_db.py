@@ -482,14 +482,22 @@ def load_term(year: int, period: str) -> pd.DataFrame:
     return shape_term(frame, period)
 
 
+# Nullable TEXT columns. A NULL comes back as NaN, and `NaN or ""` keeps the
+# NaN because NaN is truthy — which is how «nan» ended up inside a text input
+# on 2026-09-15. They are emptied once, here, so no caller has to remember.
+OPTIONAL_TEXT_COLUMNS = ("name_suffix", "notes")
+
+
 def shape_term(frame: pd.DataFrame, period: str) -> pd.DataFrame:
     """Add the derived columns page 4 expects. Pure — testable without a DB."""
     frame = frame.copy()
+    for column in OPTIONAL_TEXT_COLUMNS:
+        frame[column] = frame[column].where(frame[column].notna(), "")
     frame["course_id"] = frame["course_code"]
     frame["course_name"] = frame["course_name"].fillna("(άγνωστο μάθημα)")
     frame["display_name"] = [
         f"{name} ({suffix})" if suffix else name
-        for name, suffix in zip(frame["course_name"], frame["name_suffix"].fillna(""))
+        for name, suffix in zip(frame["course_name"], frame["name_suffix"])
     ]
     frame["class_name"] = frame["section"]
     frame["full_class_name"] = frame["display_name"] + " - " + frame["section"]

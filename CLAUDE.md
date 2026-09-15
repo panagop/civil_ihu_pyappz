@@ -763,6 +763,13 @@ so in the log.
 titles, and `display_name` prints it after the περίγραμμα name. It also drives
 the conflict rule below.
 
+**`shape_term` empties the nullable TEXT columns** (`OPTIONAL_TEXT_COLUMNS`:
+`name_suffix`, `notes`). A NULL arrives from `read_sql` as `NaN`, and
+`NaN or ""` keeps the `NaN` because **NaN is truthy** — which is how the
+literal «nan» appeared inside the «Ένδειξη μετά τον τίτλο» text input on
+2026-09-15. Emptying them once, where the frame is built, means no caller has
+to remember; `add_class` / `update_class` turn `""` back into NULL.
+
 `load_term` returns the workbook's column names (`course_id`, `class_name`,
 `full_class_name`, `semester`, `instructors`, `day`, `start_time`, `duration`,
 `room`…) so `utils/timetable_export.py` works unchanged on either source.

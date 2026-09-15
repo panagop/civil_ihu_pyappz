@@ -419,7 +419,7 @@ with tab_prepare:
         course_choices: dict[str, tuple[str, int, str]] = {}
         for _, row in subset.drop_duplicates(["course_code", "curriculum"]).iterrows():
             course_choices[f"{row['course_code']} — {row['course_name']}"] = (
-                row["course_code"], int(row["curriculum"]), row["name_suffix"] or "")
+                row["course_code"], int(row["curriculum"]), row["name_suffix"])
         for _, row in not_in_term.iterrows():
             course_choices.setdefault(
                 f"{row['course_code']} — {row['course_name']} (νέο)",
@@ -502,7 +502,9 @@ with tab_prepare:
                     index=sections.index(row["section"]) if row["section"] in sections else 0,
                     key=f"{prefix}_section",
                 )
-                suffix = c3.text_input("Ένδειξη μετά τον τίτλο:", value=row["name_suffix"] or "", key=f"{prefix}_suffix")
+                suffix = c3.text_input(
+                    "Ένδειξη μετά τον τίτλο:", value=row["name_suffix"], key=f"{prefix}_suffix"
+                )
                 instructors = st.multiselect(
                     "Διδάσκοντες:", options=staff_options, format_func=lambda i: staff_names[i],
                     default=[i for i in row["instructor_ids"] if i in staff_names], key=f"{prefix}_staff",
@@ -512,7 +514,7 @@ with tab_prepare:
                     default=[c for c in row["room_codes"] if c in room_names], key=f"{prefix}_rooms",
                 )
                 day, start, duration = placement_fields(prefix, row)
-                notes = st.text_input("Παρατηρήσεις:", value=row["notes"] or "", key=f"{prefix}_notes")
+                notes = st.text_input("Παρατηρήσεις:", value=row["notes"], key=f"{prefix}_notes")
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("Αποθήκευση", type="primary"):
                     error = tdb.update_class(
