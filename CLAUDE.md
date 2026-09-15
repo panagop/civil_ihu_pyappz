@@ -28,6 +28,8 @@ civil_ihu_pyappz/
 │   ├── eudoxus_client.py             # Unofficial client for service.eudoxus.gr
 │   ├── eudoxus_db.py                 # Εύδοξος: schema, year copy/lock, catalogue
 │   ├── seed_eudoxus.py               # Loads files/eudoxus/* into the DB (once)
+│   ├── timetable_db.py               # Πρόγραμμα: schema, terms, staff, rooms, classes, conflicts
+│   ├── seed_timetable.py             # Loads files/timetables/{staff,rooms}.csv + 2025-2026.xlsm (once)
 │   ├── app_pages/                    # NOT "pages/" — see "Navigation" below
 │   │   ├── 0_home.py                 # Landing page + Microsoft login/logout UI
 │   │   ├── 1_📇_perigrammata (legacy).py  # Syllabi v1 (Google Sheets) — superseded by page 6
@@ -35,7 +37,8 @@ civil_ihu_pyappz/
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
 │   │   ├── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
 │   │   ├── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
-│   │   └── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
+│   │   ├── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
+│   │   └── 8_🗓_timetable_v2.py      # Timetable v2 (Postgres) — public view, coordinator edits
 │   └── .streamlit/
 │       ├── config.toml               # Theme — IS committed (see "Branding and theme")
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
@@ -46,6 +49,8 @@ civil_ihu_pyappz/
 │   ├── logos/                        # Department + university marks (committed, not hot-linked)
 │   ├── exams/                        # Exam Excel files (.xlsm); active: exams-2026-06.xlsm
 │   ├── timetables/                   # Timetable Excel files (.xlsm); active: 2025-2026.xlsm
+│   │   ├── staff.csv                 # Seed: the people (site 2026-09-15 + former ΔΕΠ + «ΔΕΠ»)
+│   │   └── rooms.csv                 # Seed: the rooms, one code each
 │   ├── perigrammata/                 # Frozen Google Sheets export — seed input, then archive
 │   │   ├── perigrammata_gr_2018.csv  # 102 courses (+1 debris row without a code)
 │   │   ├── perigrammata_gr_2025.csv  # 96 courses
@@ -219,9 +224,10 @@ in the same project, with a volume. **Deliberately has no public TCP proxy**:
 it is reachable only from inside Railway, over the private network. The app
 service reads it through `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
 
-It holds three unrelated groups of tables: the `mitroa_*` ones described below, the
-`perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)" — and the
-`eudoxus_*` ones — see "Εύδοξος (page 7, Postgres)". All are installed and
+It holds four unrelated groups of tables: the `mitroa_*` ones described below, the
+`perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)" — the
+`eudoxus_*` ones — see "Εύδοξος (page 7, Postgres)" — and the `timetable_*`
+ones — see "Εβδομαδιαίο πρόγραμμα (page 8, Postgres)". All are installed and
 seeded from [streamlit/db.py](streamlit/db.py), which is the only place a
 connection is made.
 
@@ -438,7 +444,8 @@ submitted document omits them. For 2026: 58
 removals and 132 registry updates, so every one of the 52 subjects has a table.
 
 Roles are two, and there is deliberately **no users table**: a coordinator is an
-email listed in the `coordinator_emails` setting (same mechanism as
+email listed in the `coordinator_emails` setting (the same list also governs
+who edits the timetable on page 8) (same mechanism as
 `allowed_emails`), everyone else who passes the login gate is a member. Members
 may propose on any subject; only a coordinator decides proposals and locks a
 year. A table would need an admin screen to manage and still need some way to
@@ -688,6 +695,104 @@ and edited in the app. The catalogue is loaded **only while the table is
 empty** — after that the availability check owns it, and re-applying the dump
 on every restart would replace a fresh answer with a stale one. Seeded years are
 inserted as `ΚΛΕΙΔΩΜΕΝΟ`.
+
+## Εβδομαδιαίο πρόγραμμα (page 8, Postgres)
+
+Page 4 reads `files/timetables/2025-2026.xlsm` and **stays as it is** until
+told otherwise. Page 8 shows the same five views from the database and adds
+the preparation of the next semester. Viewing is public like page 4; editing
+is for `coordinator_emails` only (decided 2026-09-15), so the page checks the
+role where it matters instead of gating itself with `require_ihu_login`.
+
+Tables in [streamlit/timetable_db.py](streamlit/timetable_db.py):
+`timetable_staff` · `timetable_staff_terms` · `timetable_rooms` ·
+`timetable_terms` · `timetable_classes` · `timetable_class_instructors` ·
+`timetable_class_rooms` · `timetable_changes`.
+
+### A term is a copy of last year's same period
+
+A *term* is `(year, period)`: `(2026, 'Χειμερινό')` is the winter of 2026-27.
+`open_term` **copies** the same period one year earlier — classes, links, and
+who was active — and the coordinator rearranges; `lock_term` freezes it. One
+term is open at a time. Same model as Εύδοξος, for the same reason: one owner,
+so no proposals machinery.
+
+### Staff, not instructor
+
+The site lists ΕΤΕΠ who never teach, and "instructor" is the role a person has
+on one class. `timetable_staff` holds everyone (category ΔΕΠ / ΕΔΙΠ / ΕΤΕΠ /
+ΕΚΤΑΚΤΟΣ / ΑΛΛΟ, rank, site URL) and prints `short_name` — «Σαφούρη Χρ.» vs
+«Σαφούρη Γ.». Λιαλιαμπής and Παπαϊωάννου are former ΔΕΠ who still teach and
+are filed as ΔΕΠ. «ΔΕΠ» is a `placeholder` row for the courses all faculty
+teach (ΓΕΝ009, ΓΕΝ010); the conflict check ignores placeholders.
+
+**Activity is per term** (`timetable_staff_terms`), not a column on the
+person: a column per semester would need a migration every term, and a from/to
+range does not fit έκτακτοι who come and go. No row means *unknown*, and the
+seed marks as active only whoever taught in that term. The Προσωπικό tab edits
+the flag for the selected term with a `data_editor`.
+
+### Classes
+
+One row per meeting, as a workbook row was: εξάμηνο, course, `section`
+(Θ · Ε · Ε1…Ε9 · Φ), day 1–5, whole `start_hour` (08–20, **no half hours**),
+`duration`. `day IS NULL` is a course listed for the term and not yet placed —
+the 16 workbook rows with only a semester survive that way, and the
+Προετοιμασία tab lists them. Instructors and rooms are link tables: both are
+already many-to-one in the data (ΓΕΝ002 has two instructors, ΔΟΜ011 two rooms).
+
+**Names come from the περιγράμματα.** The row stores `curriculum` +
+`course_code`, and `load_term` joins `perigrammata_courses` — so the seed must
+run after the περιγράμματα one. The curriculum is stored rather than guessed
+because the department is mid-transition: `NEW_CURRICULUM_EXAMINA` says which
+εξάμηνα follow the 2025 programme in each year (2025-26 and 2026-27: only the
+first year, εξάμηνα 1–2; everything else 2018 — decided 2026-09-15). Extend it
+when the next year moves over. `candidate_courses` uses the same rule to list
+what the programme offers for a period. ΔΟΜ004 sits in the 2nd εξάμηνο but is
+not in the 2025 programme; the seed falls back to 2018 for such codes and says
+so in the log.
+
+`name_suffix` keeps the «ΔΥ, ΥΕ» marker the workbook wrote after elective
+titles, and `display_name` prints it after the περίγραμμα name. It also drives
+the conflict rule below.
+
+`load_term` returns the workbook's column names (`course_id`, `class_name`,
+`full_class_name`, `semester`, `instructors`, `day`, `start_time`, `duration`,
+`room`…) so `utils/timetable_export.py` works unchanged on either source.
+
+### Conflicts are warnings, not constraints
+
+`conflicts(frame)` is pure and runs on what `load_term` returns. Two placed
+classes on the same day with overlapping hours conflict when they share a
+room, share a non-placeholder instructor, or belong to the same εξάμηνο —
+**except** parallel lab groups of one course (Ε1 / Ε2 run together on
+purpose) and electives whose stream markers share no letter (ΓΥ beside
+«ΥΥ, ΔΕ» is fine; ΓΥ beside ΓΕ is not; a course without a marker is common to
+all and conflicts with anything). Θ and Ε of the same course overlapping *is* a
+conflict. The tab shows them as a table; saving is never blocked, because a
+term being rearranged is allowed to be inconsistent. With the stream rule the
+seeded 2025-26 still reports a handful, all genuinely in the workbook (ΔΟΜ001
+Θ and ΔΟΜ002 Ε1 both in 301 on Tuesday 10:00; ΓΕΩ009 «ΓΥ» over ΥΔΡ006
+«ΥΥ, ΓΕ»).
+
+### Seed data
+
+[streamlit/seed_timetable.py](streamlit/seed_timetable.py) loads
+`files/timetables/staff.csv` and `rooms.csv` while those tables are empty, and
+`2025-2026.xlsm` as two locked terms — once. `WORKBOOKS` is an explicit dict,
+not a glob: **`2026-2027.xlsm` is a byte-identical copy of the 2025-26 file**
+and must not be seeded as 2026-27 (it is kept until the database approach is
+confirmed, then deleted). `ROOM_ALIASES` maps every room spelling the workbook
+used to a code («Αίθ. Τεχν. Σχεδίου 1» and «Εργαστήριο Τεχνικού Σχεδίου Ι»
+are the same room, ΤΣ1); an unmapped spelling **raises**, as does an unknown
+instructor. The bare «Σαφούρη» on ΔΟΜ007 is Γεωργία (the drawing lab).
+
+Rooms and staff are edited in the page from then on; the CSVs are the
+historical record, like the μητρώα workbooks.
+
+[tests/test_timetable.py](tests/test_timetable.py) covers the parser without
+a database, and the seed, copy-open, edits, lock and the page script itself
+(via `streamlit.testing.v1.AppTest`) against the embedded Postgres.
 
 ## Branding and theme
 

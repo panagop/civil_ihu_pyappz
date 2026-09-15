@@ -207,6 +207,7 @@ def get_engine() -> Engine | None:
         # module for the engine, so a top-level import would be circular.
         from eudoxus_db import SCHEMA_SQL as EUDOXUS_SCHEMA_SQL
         from perigrammata_db import SCHEMA_SQL as PERIGRAMMATA_SCHEMA_SQL
+        from timetable_db import SCHEMA_SQL as TIMETABLE_SCHEMA_SQL
 
         with engine.begin() as conn:
             dropped = _drop_committed_backup_copies(conn)
@@ -215,6 +216,7 @@ def get_engine() -> Engine | None:
             conn.execute(text(MIGRATIONS_SQL))
             conn.execute(text(PERIGRAMMATA_SCHEMA_SQL))
             conn.execute(text(EUDOXUS_SCHEMA_SQL))
+            conn.execute(text(TIMETABLE_SCHEMA_SQL))
         if dropped:
             print(
                 "[db.get_engine] Διαγράφηκαν αντίγραφα ασφαλείας που υπάρχουν "
@@ -390,10 +392,13 @@ def bootstrap() -> str:
         from seed_eudoxus import seed_eudoxus
         from seed_external import seed_historical_years
         from seed_perigrammata import seed_perigrammata
+        from seed_timetable import seed_timetable
 
         status = seed_historical_years(engine)
         status = f"{status} · {seed_perigrammata(engine)}"
         status = f"{status} · {seed_eudoxus(engine)}"
+        # After the περιγράμματα: the timetable resolves its course codes there.
+        status = f"{status} · {seed_timetable(engine)}"
         # Report the tables too: without SSH into the container, and with no
         # public proxy to the database, the log line is the only way to confirm
         # a schema change actually landed.

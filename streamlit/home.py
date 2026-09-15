@@ -81,6 +81,11 @@ PAGES = [
         title="Εύδοξος - Συγγράμματα",
         icon="📚",
     ),
+    st.Page(
+        "app_pages/8_🗓_timetable_v2.py",
+        title="Εβδομαδιαίο πρόγραμμα v2",
+        icon="🗓",
+    ),
 ]
 
 st.navigation(PAGES).run()
