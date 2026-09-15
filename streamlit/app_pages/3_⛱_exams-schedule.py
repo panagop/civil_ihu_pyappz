@@ -1,0 +1,365 @@
+﻿from datetime import datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+from streamlit_calendar import calendar
+
+from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS
+from utils.exams_data import default_period_index, discover_exam_periods, load_data
+from utils.exams_export import create_weekly_calendar_document
+
+st.set_page_config(
+    layout="wide",
+    page_title="Πρόγραμμα Εξετάσεων",
+    page_icon="🗓️",
+)
+
+from branding import apply_branding  # noqa: E402
+
+apply_branding()
+
+EXAMS_DIR = Path(__file__).parent.parent.parent / "files" / "exams"
+
+exam_periods = discover_exam_periods(EXAMS_DIR)
+if not exam_periods:
+    st.error(
+        "❌ Δεν βρέθηκαν αρχεία εξεταστικής (exams-yyyy-mm.xlsm) στον φάκελο files/exams."
+    )
+    st.stop()
+
+period_labels = [p["label"] for p in exam_periods]
+selected_label: str = st.radio(
+    "Επιλέξτε εξεταστική περίοδο:",
+    options=period_labels,
+    index=default_period_index(exam_periods),
+    key="exams_period_file",
+)
+selected_period = exam_periods[period_labels.index(selected_label)]
+
+period_selection = selected_period["name"]
+exam_period = f"{selected_period['name']} {selected_period['academic_year']}"
+
+st.title(f"🗓️ Πρόγραμμα Εξετάσεων - {exam_period}")
+
+program_selection: str = st.radio(
+    "Επιλογή προγράμματος σπουδών:",
+    options=["ΔΙΠΑΕ", "ΤΕΙ"],
+    index=0,
+    key="program_selection",
+)
+
+st.markdown(f"Έχετε επιλέξει το πρόγραμμα σπουδών: **{program_selection}**")
+
+INPUT_SHEET = program_selection
+INPUT_EXCEL = selected_period["path"]
+
+
+tab_full_table, tab_instructor_filter, tab_semester_filter, tab_epitiritis_filter, tab_calendar, tab_export_weekly = st.tabs(
+    [
+        "Πλήρης Πίνακας Εξετάσεων",
+        "Φιλτράρισμα κατά Διδάσκοντα",
+        "Φιλτράρισμα κατά Εξάμηνο",
+        "Φιλτράρισμα κατά Επιτηρητή",
+        "Ημερολόγιο Εξετάσεων",
+        "Εξαγωγή Εβδομαδιαίου Προγράμματος",
+    ]
+)
+
+extra_column = "students_total" if program_selection == "ΔΙΠΑΕ" else "φοιτΤΕΙ"
+df = load_data(INPUT_EXCEL, INPUT_SHEET, extra_column=extra_column)
+
+
+with tab_full_table:
+    st.subheader("Πλήρης Πίνακας Εξετάσεων")
+    display_cols = [col for col in df.columns if col not in ['start_dt', 'iso_week_number']]
+    st.dataframe(df[display_cols])
+
+instructors = sorted(df["instructor"].unique().tolist())
+
+
+with tab_instructor_filter:
+    selected_instructor = st.selectbox(
+        "Επιλέξτε διδάσκοντα για φιλτράρισμα:",
+        options=instructors)
+
+    df_instr = df[df["instructor"] == selected_instructor].sort_values(
+        by=["start_dt"]
+    )
+
+    st.subheader(f"Πρόγραμμα Εξετάσεων Διδάσκοντα - {selected_instructor}")
+    display_cols = [col for col in df_instr.columns if col not in ['start_dt', 'iso_week_number']]
+    st.dataframe(df_instr[display_cols])
+
+with tab_semester_filter:
+    semesters = sorted(df["semester"].unique().tolist())
+    selected_semester = st.selectbox(
+        "Επιλέξτε εξάμηνο για φιλτράρισμα:",
+        options=semesters
+    )
+
+    df_sem = df[df["semester"] == selected_semester].sort_values(
+        by=["start_dt"]
+    )
+
+    st.subheader(f"Πρόγραμμα Εξετάσεων Εξαμήνου - {selected_semester}")
+    display_cols = [col for col in df_sem.columns if col not in ['start_dt', 'iso_week_number']]
+    st.dataframe(df_sem[display_cols], height=600)
+
+with tab_epitiritis_filter:
+    epitirites_list = []
+    for val in df["epitirites"].dropna().unique():
+        if pd.notna(val):
+            epitirites_list.extend([e.strip() for e in str(val).split(',')])
+
+    epitirites_unique = sorted(list(set(epitirites_list)))
+
+    if epitirites_unique:
+        selected_epitiritis = st.selectbox(
+            "Επιλέξτε επιτηρητή για φιλτράρισμα:",
+            options=epitirites_unique
+        )
+
+        df_epit = df[df["epitirites"].apply(
+            lambda x: selected_epitiritis in str(x) if pd.notna(x) else False
+        )].sort_values(by=["start_dt"])
+
+        st.subheader(f"Πρόγραμμα Επιτηρήσεων - {selected_epitiritis}")
+
+        display_cols = [col for col in df_epit.columns if col not in ['start_dt', 'iso_week_number']]
+        st.dataframe(df_epit[display_cols], height=600)
+
+        st.markdown("### Στατιστικά")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Συνολικές Επιτηρήσεις", len(df_epit))
+        with col2:
+            unique_weeks = df_epit['week_number'].nunique()
+            st.metric("Εβδομάδες με Επιτηρήσεις", unique_weeks)
+    else:
+        st.warning("⚠️ Δεν βρέθηκαν δεδομένα επιτηρητών στο αρχείο.")
+
+with tab_calendar:
+    st.subheader("Ημερολόγιο Εξετάσεων")
+
+    semesters_all = sorted(df["semester"].unique().tolist())
+    semester_options = [f"Εξάμηνο {int(s)}" for s in semesters_all]
+
+    selected_calendar_semesters = st.multiselect(
+        "Φιλτράρισμα ημερολογίου κατά εξάμηνο:",
+        options=semester_options,
+        default=semester_options,
+        key="calendar_semester_filter"
+    )
+
+    if not selected_calendar_semesters or len(selected_calendar_semesters) == len(semester_options):
+        df_calendar = df
+    else:
+        semester_nums = [int(s.split()[-1]) for s in selected_calendar_semesters]
+        df_calendar = df[df["semester"].isin(semester_nums)]
+
+    initial_date = df_calendar["exam_date"].min() if not df_calendar.empty else datetime.now().date()
+
+    calendar_options = {
+        "initialView": "timeGridWeek",
+        "initialDate": initial_date.strftime("%Y-%m-%d"),
+        "selectable": True,
+        "weekends": False,
+        "slotMinTime": "08:00:00",
+        "slotMaxTime": "22:00:00",
+        "headerToolbar": {
+            "left": "today prev,next",
+            "center": "title",
+            "right": "dayGridMonth,timeGridWeek,timeGridDay"
+        }
+    }
+
+    calendar_events = []
+    for _, row in df_calendar.iterrows():
+        if pd.notna(row["start_dt"]):
+            start_str = row["start_dt"].strftime("%Y-%m-%dT%H:%M:%S")
+
+            end_dt = row["start_dt"] + timedelta(hours=2)
+            end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+            def clean_text(value):
+                if pd.notna(value):
+                    text = str(value).replace('\n', ' ').replace('\r', ' ')
+                    text = text.replace('"', '').replace("'", '').replace('\\', '')
+                    return text.strip()
+                return ""
+
+            course_name = clean_text(row['course_name'])
+            instructor = clean_text(row['instructor'])
+            room = clean_text(row['room'])
+            semester = int(row['semester']) if pd.notna(row['semester']) else 1
+            semester_str = str(semester)
+
+            color = SEMESTER_COLORS.get(semester, DEFAULT_SEMESTER_COLOR)
+
+            students_raw = row.get(extra_column) if extra_column else None
+            if pd.notna(students_raw):
+                try:
+                    students_str = str(int(float(students_raw)))
+                except (TypeError, ValueError):
+                    students_str = str(students_raw)
+                students_suffix = '\n' + f'Αρ. Φοιτ. {students_str}'
+            else:
+                students_suffix = ''
+
+            event = {
+                "title": f'Εξ.{semester_str} - {course_name} - {instructor}{students_suffix}',
+                "start": start_str,
+                "end": end_str,
+                "color": color
+            }
+            calendar_events.append(event)
+
+    if not selected_calendar_semesters or len(selected_calendar_semesters) == len(semester_options):
+        st.write(f"📅 Σύνολο εξετάσεων: {len(calendar_events)} (όλα τα εξάμηνα)")
+    else:
+        semesters_text = ", ".join(selected_calendar_semesters)
+        st.write(f"📅 Σύνολο εξετάσεων: {len(calendar_events)} ({semesters_text})")
+
+    if 'show_exam_calendar' not in st.session_state:
+        st.session_state.show_exam_calendar = False
+
+    if not st.session_state.show_exam_calendar:
+        if st.button("📅 Εμφάνιση Ημερολογίου", key="show_exam_cal_btn"):
+            st.session_state.show_exam_calendar = True
+            st.rerun()
+
+    # On hover, expand the event box to full column width and lift it above the
+    # others so the entire title is readable — including when multiple exams
+    # share the same time slot (FullCalendar splits the cell horizontally).
+    exam_calendar_css = """
+        .fc-event { cursor: pointer; }
+
+        /* Honor newlines (\\n) in event titles so multi-line text renders. */
+        .fc-event-title {
+            white-space: pre-line !important;
+        }
+
+        /* Hovered event jumps in front of its neighbours */
+        .fc-timegrid-event-harness:hover,
+        .fc-daygrid-event:hover {
+            z-index: 1000 !important;
+        }
+
+        /* Stretch the hovered harness back to the full column width so split
+           cells (overlapping exams) become readable. */
+        .fc-timegrid-event-harness:hover {
+            inset-inline-start: 0 !important;
+            inset-inline-end: 0 !important;
+            right: 0 !important;
+            left: 0 !important;
+            width: auto !important;
+        }
+        .fc-timegrid-event-harness:hover > .fc-timegrid-event {
+            width: auto !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Let the title wrap inside the now-wider box */
+        .fc-event:hover .fc-event-title,
+        .fc-event:hover .fc-event-main,
+        .fc-event:hover .fc-event-main-frame {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+    """
+
+    if st.session_state.show_exam_calendar:
+        if calendar_events:
+            calendar_data = calendar(
+                events=calendar_events,
+                options=calendar_options,
+                custom_css=exam_calendar_css,
+            )
+        else:
+            st.info("Δεν υπάρχουν εξετάσεις για εμφάνιση με τα επιλεγμένα φίλτρα.")
+
+
+with tab_export_weekly:
+    st.subheader("Εξαγωγή Εβδομαδιαίου Προγράμματος Εξετάσεων")
+    st.markdown("Δημιουργήστε αρχείο Word με το εβδομαδιαίο πρόγραμμα εξετάσεων για διανομή σε συναδέλφους.")
+
+    st.markdown("### Επιλογές Φιλτραρίσματος")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        semesters_export = sorted(df["semester"].unique().tolist())
+        semester_options_export = [f"Εξάμηνο {int(s)}" for s in semesters_export]
+
+        selected_export_semesters = st.multiselect(
+            "Επιλέξτε εξάμηνα:",
+            options=semester_options_export,
+            default=semester_options_export,
+            key="export_semester_filter"
+        )
+
+    with col2:
+        weeks_available = sorted(df['week_number'].unique().tolist())
+        week_options = [f"Εβδομάδα {int(w)}" for w in weeks_available]
+
+        selected_export_weeks = st.multiselect(
+            "Επιλέξτε εβδομάδες:",
+            options=week_options,
+            default=week_options,
+            key="export_week_filter"
+        )
+
+    include_epitirites = st.checkbox(
+        "Συμπερίληψη επιτηρητών στο αρχείο Word",
+        value=True,
+        key="include_epitirites_checkbox",
+        help="Επιλέξτε αν θέλετε να περιλαμβάνονται οι επιτηρητές στο εξαγόμενο αρχείο"
+    )
+
+    df_export = df.copy()
+
+    if selected_export_semesters and len(selected_export_semesters) < len(semester_options_export):
+        semester_nums = [int(s.split()[-1]) for s in selected_export_semesters]
+        df_export = df_export[df_export["semester"].isin(semester_nums)]
+
+    if selected_export_weeks and len(selected_export_weeks) < len(week_options):
+        week_nums = [int(w.split()[-1]) for w in selected_export_weeks]
+        df_export = df_export[df_export["week_number"].isin(week_nums)]
+
+    st.markdown("### Προεπισκόπηση Δεδομένων")
+    st.write(f"Σύνολο εξετάσεων προς εξαγωγή: {len(df_export)}")
+
+    if not df_export.empty:
+        st.dataframe(
+            df_export[['exam_date', 'day_of_week', 'start_time', 'semester',
+                       'course_name', 'instructor', 'room', 'epitirites']].sort_values(by=['exam_date', 'start_time']),
+            height=400
+        )
+
+        st.markdown("### Λήψη Αρχείου")
+
+        try:
+            word_file = create_weekly_calendar_document(
+                df_export,
+                period=period_selection,
+                include_epitirites=include_epitirites,
+            )
+
+            filename = f"Πρόγραμμα_Εξετάσεων_{program_selection}_{period_selection}_{selected_period['academic_year']}.docx"
+
+            st.download_button(
+                label="📥 Λήψη Word Αρχείου",
+                data=word_file,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                help="Κατεβάστε το εβδομαδιαίο πρόγραμμα εξετάσεων σε μορφή Word"
+            )
+
+            st.success("✅ Το αρχείο είναι έτοιμο για λήψη!")
+
+        except Exception as e:
+            st.error(f"Σφάλμα κατά τη δημιουργία του αρχείου: {e}")
+    else:
+        st.warning("⚠️ Δεν υπάρχουν δεδομένα με τα επιλεγμένα φίλτρα.")
