@@ -52,11 +52,6 @@ PAGES = [
         default=True,
     ),
     st.Page(
-        "app_pages/1_📇_perigrammata (legacy).py",
-        title="Περιγράμματα (παλαιό)",
-        icon="📇",
-    ),
-    st.Page(
         "app_pages/3_⛱_exams-schedule.py",
         title="Πρόγραμμα Εξετάσεων",
         icon="⛱",
@@ -74,6 +69,11 @@ PAGES = [
     st.Page(
         "app_pages/6_📇_perigrammata_v2.py",
         title="Περιγράμματα μάθημάτων",
+        icon="📇",
+    ),
+    st.Page(
+        "app_pages/1_📇_perigrammata (legacy).py",
+        title="Περιγράμματα (παλαιό)",
         icon="📇",
     ),
     st.Page(
