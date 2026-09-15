@@ -347,11 +347,25 @@ with tab_prepare:
     summary["Χωρίς ώρα"] = summary["Γραμμές"] - summary["Με ώρα"]
     st.dataframe(summary, width="stretch")
 
-    stale = tdb.off_programme(df, year)
+    # Only the rows the new programme cannot take over: a course it has under
+    # the same code and εξάμηνο is simply re-stamped below, not reported.
+    index = tdb.programme_examina()
+    retaggable = tdb.retaggable(df, year, index)
+    if coordinator and editable and not retaggable.empty:
+        st.info(
+            f"{len(retaggable)} γραμμές διδάσκονται και στα δύο προγράμματα με τον ίδιο "
+            "κωδικό και εξάμηνο, αλλά είναι ακόμη καταχωρημένες στο παλιό."
+        )
+        if st.button("Ενημέρωση προγράμματος σπουδών", key="retag_curricula"):
+            moved = tdb.retag_curricula(year, period, user_email)
+            st.success(f"Ενημερώθηκαν {moved} γραμμές.")
+            st.rerun()
+
+    stale = tdb.off_programme(df, year, index)
     if not stale.empty:
         st.warning(
-            f"{len(stale)} γραμμές ανήκουν σε πρόγραμμα σπουδών διαφορετικό από αυτό που "
-            "ακολουθεί το εξάμηνό τους φέτος (μεταφέρθηκαν από πέρυσι). "
+            f"{len(stale)} γραμμές είναι μαθήματα που το πρόγραμμα σπουδών του εξαμήνου "
+            "τους φέτος δεν περιλαμβάνει (μεταφέρθηκαν από πέρυσι). "
             "Αντικαταστήστε τις με τα μαθήματα του σωστού προγράμματος."
         )
         st.dataframe(

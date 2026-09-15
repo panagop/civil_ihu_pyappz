@@ -301,22 +301,10 @@ def open_term(
             )
         ]
         # A copied row follows the programme its εξάμηνο runs on in the *new*
-        # year, where that programme has the code *in the same εξάμηνο*: the
-        # transition moves one year of study forward each year, so last
-        # winter's 3rd-εξάμηνο rows (2018) become 2025 rows in 2026-27. The
-        # εξάμηνο must match because 84 codes are shared between programmes
-        # with different content and sometimes a different εξάμηνο (ΔΟΜ007 is
-        # 3rd in 2018, 4th in 2025). Anything else keeps its old curriculum and
-        # is listed by the page as belonging to the old programme.
-        known = {
-            (row[0], row[1]): row[2]
-            for row in conn.execute(
-                text(
-                    f"SELECT curriculum, code, examino FROM {PERIGRAMMATA_TABLE} "
-                    "WHERE locale = 'gr'"
-                )
-            )
-        }
+        # year — the transition moves one year of study forward each year, so
+        # last winter's 3rd-εξάμηνο rows (2018) become 2025 rows in 2026-27.
+        # `_retagged` holds the rule; what it leaves alone is `off_programme`.
+        known = _programme_examina(conn)
         mapping: dict[int, int] = {}
         moved = 0
         for old_id in old_ids:
@@ -336,8 +324,8 @@ def open_term(
                 text(f"SELECT examino, course_code, curriculum FROM {CLASSES_TABLE} WHERE id = :id"),
                 {"id": new_id},
             ).one()
-            wanted = curriculum_for(year, examino)
-            if wanted != curriculum and known.get((wanted, code)) == examino:
+            wanted = _retagged(examino, code, curriculum, year, known)
+            if wanted is not None:
                 conn.execute(
                     text(f"UPDATE {CLASSES_TABLE} SET curriculum = :c WHERE id = :id"),
                     {"c": wanted, "id": new_id},
@@ -808,20 +796,123 @@ def _describe(course_code, section, day, start_hour, duration) -> str:
 # Candidate courses for the arranging tab
 # --------------------------------------------------------------------------
 
-def off_programme(frame: pd.DataFrame, year: int) -> pd.DataFrame:
-    """Rows whose curriculum is not the one their εξάμηνο runs on in ``year``.
+def off_programme(
+    frame: pd.DataFrame, year: int, index: dict[tuple[int, str], int] | None = None
+) -> pd.DataFrame:
+    """Rows the new programme cannot take over, and the coordinator must replace.
 
-    After a copy across the transition these are last year's courses of an
-    εξάμηνο that has since moved to the 2025 programme — to be replaced by the
-    coordinator, not silently.
+    Most of the 2025 programme repeats the 2018 one code for code and εξάμηνο
+    for εξάμηνο, so a row copied from last year is usually not a problem at
+    all: only its ``curriculum`` stamp is stale, and ``retag_curricula`` moves
+    it. What is reported here is the remainder — a code the new programme does
+    not have (ΥΔΡ001) or has in a different εξάμηνο (ΔΟΜ007: 3rd in 2018, 4th
+    in 2025) — where somebody has to decide what runs instead.
     """
     if frame.empty:
         return frame
+    if index is None:
+        index = programme_examina()
     mask = [
         int(curriculum) != curriculum_for(year, int(examino))
-        for curriculum, examino in zip(frame["curriculum"], frame["examino"])
+        and _retagged(examino, code, curriculum, year, index) is None
+        for curriculum, examino, code in zip(
+            frame["curriculum"], frame["examino"], frame["course_code"]
+        )
     ]
     return frame[mask]
+
+
+def retaggable(
+    frame: pd.DataFrame, year: int, index: dict[tuple[int, str], int] | None = None
+) -> pd.DataFrame:
+    """Rows whose stamp is stale but whose course the new programme also has."""
+    if frame.empty:
+        return frame
+    if index is None:
+        index = programme_examina()
+    mask = [
+        _retagged(examino, code, curriculum, year, index) is not None
+        for curriculum, examino, code in zip(
+            frame["curriculum"], frame["examino"], frame["course_code"]
+        )
+    ]
+    return frame[mask]
+
+
+def _retagged(examino, code, curriculum, year, index) -> int | None:
+    """The curriculum this row should carry in ``year``, or None to leave it.
+
+    A row follows the programme its εξάμηνο runs on that year, but only where
+    that programme has the code **in the same εξάμηνο**: 84 codes are shared
+    between the two programmes, sometimes with different content and a
+    different εξάμηνο, so a bare code match would move ΔΟΜ007 into a year of
+    study it is not taught in.
+    """
+    wanted = curriculum_for(year, int(examino))
+    if wanted == int(curriculum) or index.get((wanted, code)) != int(examino):
+        return None
+    return wanted
+
+
+def programme_examina() -> dict[tuple[int, str], int]:
+    """(curriculum, code) -> εξάμηνο, out of the Greek περιγράμματα."""
+    engine = db.get_engine()
+    if engine is None:
+        return {}
+    with engine.connect() as conn:
+        return _programme_examina(conn)
+
+
+def _programme_examina(conn) -> dict[tuple[int, str], int]:
+    return {
+        (row[0], row[1]): row[2]
+        for row in conn.execute(
+            text(
+                f"SELECT curriculum, code, examino FROM {PERIGRAMMATA_TABLE} "
+                "WHERE locale = 'gr'"
+            )
+        )
+    }
+
+
+def retag_curricula(year: int, period: str, author: str) -> int:
+    """Re-stamp the term's rows onto the programme their εξάμηνο runs on.
+
+    ``open_term`` does this while copying, but the transition rule itself
+    changes — 2026-27 moved εξάμηνα 3–4 onto the 2025 programme after that
+    year had been opened — and then a term already copied carries stamps that
+    were right when it was made. Nothing but the stamp moves: same course,
+    same εξάμηνο, same hour.
+    """
+    engine = db.get_engine()
+    if engine is None:
+        return 0
+    with engine.begin() as conn:
+        index = _programme_examina(conn)
+        rows = conn.execute(
+            text(
+                f"SELECT id, examino, course_code, curriculum FROM {CLASSES_TABLE} "
+                "WHERE year = :year AND period = :period"
+            ),
+            {"year": year, "period": period},
+        ).all()
+        moved = 0
+        for class_id, examino, code, curriculum in rows:
+            wanted = _retagged(examino, code, curriculum, year, index)
+            if wanted is None:
+                continue
+            conn.execute(
+                text(f"UPDATE {CLASSES_TABLE} SET curriculum = :c WHERE id = :id"),
+                {"c": wanted, "id": class_id},
+            )
+            moved += 1
+        if moved:
+            _log(
+                conn, year, period, None, MODIFY,
+                f"Ενημέρωση προγράμματος σπουδών σε {moved} γραμμές",
+                author,
+            )
+    return moved
 
 
 def candidate_courses(year: int, period: str) -> pd.DataFrame:

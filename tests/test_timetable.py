@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from sqlalchemy import text as sa_text
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))
@@ -248,10 +249,32 @@ def test_open_copy_edit_and_lock(database):
     # it is reported as off-programme together with the codes 2025 lacks.
     dom007 = third[third["course_code"] == "ΔΟΜ007"]
     assert (dom007["curriculum"] == 2018).all()
+    # ΓΕΝ007 is 3rd in both programmes, so it is not a problem to report.
     stale = tdb.off_programme(copied, 2026)
     assert set(stale["course_code"]) >= {"ΔΟΜ007", "ΔΟΜ006", "ΔΟΜ008", "ΥΔΡ001"}
+    assert "ΓΕΝ007" not in set(stale["course_code"])
     assert (stale["examino"] == 3).all()
     assert tdb.off_programme(tdb.load_term(2025, tdb.WINTER), 2025).empty
+    # A term copied before the transition rule moved εξάμηνα 3–4 onto the 2025
+    # programme carries stale stamps: retag_curricula moves exactly those, and
+    # leaves the ones off_programme reports.
+    with db.get_engine().begin() as conn:
+        conn.execute(
+            sa_text(
+                f"UPDATE {tdb.CLASSES_TABLE} SET curriculum = 2018 "
+                "WHERE year = 2026 AND period = :p"
+            ),
+            {"p": tdb.WINTER},
+        )
+    reverted = tdb.load_term(2026, tdb.WINTER)
+    assert not tdb.retaggable(reverted, 2026).empty
+    moved = tdb.retag_curricula(2026, tdb.WINTER, "c@ihu.gr")
+    assert moved > 0
+    retagged = tdb.load_term(2026, tdb.WINTER)
+    assert tdb.retaggable(retagged, 2026).empty
+    assert set(tdb.off_programme(retagged, 2026)["course_code"]) == set(stale["course_code"])
+    assert (retagged[retagged["course_code"] == "ΔΟΜ007"]["curriculum"] == 2018).all()
+    assert (retagged[retagged["course_code"] == "ΓΕΝ007"]["curriculum"] == 2025).all()
     # The copy carries last winter's activity
     active = tdb.staff_for_term(2026, tdb.WINTER)
     assert bool(active[active["short_name"] == "Κίρτας"]["active"].iloc[0])
