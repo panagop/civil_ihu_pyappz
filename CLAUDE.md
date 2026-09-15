@@ -13,7 +13,7 @@ uv run streamlit run streamlit/home.py
 ```
 civil_ihu_pyappz/
 ├── streamlit/                        # Streamlit app (entry point + pages)
-│   ├── home.py                       # Landing page + Microsoft login/logout UI
+│   ├── home.py                       # Entry point — st.navigation only (see "Navigation")
 │   ├── auth.py                       # OIDC gate helpers (require_ihu_login, render_login_block)
 │   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
@@ -28,9 +28,9 @@ civil_ihu_pyappz/
 │   ├── eudoxus_client.py             # Unofficial client for service.eudoxus.gr
 │   ├── eudoxus_db.py                 # Εύδοξος: schema, year copy/lock, catalogue
 │   ├── seed_eudoxus.py               # Loads files/eudoxus/* into the DB (once)
-│   ├── pages/
+│   ├── app_pages/                    # NOT "pages/" — see "Navigation" below
+│   │   ├── 0_home.py                 # Landing page + Microsoft login/logout UI
 │   │   ├── 1_📇_perigrammata (legacy).py  # Syllabi v1 (Google Sheets) — superseded by page 6
-│   │   ├── 2_📊_mitroa (legacy).py        # Registries v1 — superseded by page 5
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
 │   │   ├── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
@@ -89,14 +89,13 @@ secrets file manually with:
 
 ```toml
 gsheet_perigrammata_id = "..."
-gsheet_mitroa_id = "..."
 gsheet_exams_schedule_id = "..."
 
 # Optional: restrict access to specific @ihu.gr emails. If omitted or empty,
 # ANY @ihu.gr account is allowed. See "Authentication" section below.
 # allowed_emails = ["someone@ihu.gr", "another@ihu.gr"]
 
-# Microsoft Entra ID OIDC — required for pages 1 (perigrammata) and 2 (mitroa).
+# Microsoft Entra ID OIDC — required for the gated pages (1, 5, 6, 7).
 # Restricted to @ihu.gr accounts by streamlit/auth.py.
 [auth]
 redirect_uri = "http://localhost:8501/oauth2callback"
@@ -145,14 +144,14 @@ the script writes.
 ## Authentication
 
 > **Active since 2026-09-06.** Microsoft login works in all three environments.
-> Gated: pages 1, 2, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3 and 4 —
+> Gated: pages 1, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3 and 4 —
 > timetables and exam schedules carry no personal data.
 >
 > `st.login()` raises `StreamlitAuthError` where `[auth]` is missing, so never
 > call it unguarded — `auth.is_configured()` exists for that, and
 > `render_login_block()` shows a warning instead of a traceback.
 
-Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
+The gated pages sit behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
 
 - `render_login_block()` — called from `home.py`. Shows the login button when logged out; user info + logout when logged in.
 - `require_ihu_login()` — called at the top of each protected page (after `st.set_page_config(...)`). Checks state and `st.stop()`s if unauthorized.
@@ -197,8 +196,10 @@ Railway (workspace "Georgios Panagopoulos's Projects", Hobby plan):
 - Service `civil-ihu-pyappz` — `90a05a29-32ff-4d6a-9e8a-3ff28073fcdd`
 - Builder Railpack; start command
   `streamlit run streamlit/home.py --server.port $PORT --server.address 0.0.0.0`
-- Variables set: `gsheet_perigrammata_id`, `gsheet_mitroa_id`,
-  `gsheet_exams_schedule_id` (flat env vars — resolved via `settings.py`),
+- Variables set: `gsheet_perigrammata_id`, `gsheet_exams_schedule_id` (flat
+  env vars — resolved via `settings.py`; `gsheet_mitroa_id` is still set but no
+  longer read — page 2 was deleted on 2026-09-15 and nothing else opens that
+  sheet, so it can be removed at any time),
   `DATABASE_URL` (reference to the Postgres service), and for OIDC
   `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, `AUTH_COOKIE_SECRET`,
   `AUTH_SERVER_METADATA_URL` (+ optional `AUTH_REDIRECT_URI`, otherwise derived
@@ -742,10 +743,37 @@ Current Streamlit guidance, worth following in new code:
   imports legitimately follow code; selecting the rule keeps the `# noqa: E402`
   comments that document this meaningful. Since ruff 0.16 they are otherwise
   reported as unused directives on every page — 33 of them.
-- Pages still use the legacy `pages/` folder. Streamlit now recommends
-  `st.navigation` / `st.Page`, which would give proper Greek titles and icons in
-  the sidebar instead of `5_📊_mitroa_v2`-style filenames. Not done: it touches
-  every page.
+### Navigation (st.navigation, since 2026-09-15)
+
+[streamlit/home.py](streamlit/home.py) is **only** a router: it declares every
+page with `st.Page` and calls `st.navigation(...).run()`. The sidebar therefore
+carries real Greek titles instead of `5_📊_mitroa_v2`-style filenames.
+
+- **The folder is `app_pages/`, and renaming it back would silently disable all
+  of this.** Streamlit still runs its legacy multipage machinery whenever a
+  `pages/` directory sits beside the entry script (`_mpa_v1` in
+  `runtime/scriptrunner/script_runner.py`, keyed on
+  `PagesManager.uses_pages_directory`): it builds navigation from the folder
+  itself and never reaches the `st.navigation` call.
+- **The page filenames keep their number and emoji, and must.** `st.Page`
+  derives a page's URL from the filename with the same function the old folder
+  used (`source_util.page_icon_and_name`, which strips the leading number and
+  the emoji), so `/mitroa_v2`, `/exams-schedule` and the rest still resolve and
+  old links keep working. The numbers no longer order anything — the list in
+  `home.py` does — but renaming a file changes its URL.
+- Titles are passed explicitly and repeat what each page sets in its own
+  `st.set_page_config(page_title=…)`, so the sidebar label and the browser tab
+  agree. Icons are passed explicitly too and are the same emoji the filenames
+  carry.
+- **The router runs on every rerun, before the selected page.** Anything put
+  there is paid for by every page, which is why the landing page is an ordinary
+  page (`app_pages/0_home.py`) rather than the body of `home.py`, and why
+  `db.bootstrap()` stayed with it. The pages that need the database still call
+  `bootstrap()` themselves.
+- `st.set_page_config` accepts **repeated, additive calls**: the router sets the
+  app-wide title, favicon and sidebar state, and a page's own call overrides
+  what it names. The router deliberately sets no `layout`, so the pages that
+  want a wide one keep deciding for themselves.
 
 ## Active data files
 
