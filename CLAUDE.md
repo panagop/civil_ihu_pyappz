@@ -274,9 +274,13 @@ so the snapshot lives in the database until it has been downloaded.
 **Backups leave the database through the app.** The coordinator section of
 the «Προετοιμασία <έτους>» tab has «Αντίγραφο ασφαλείας της βάσης (CSV)»
 (`db.backup_archive`): every `mitroa_*` table as a CSV in one zip. Commit the
-download under `files/mitroa/db_backups/`; once the 2026-09-15 snapshot is
-committed, the `mitroa_backup_*` copies can be dropped (see
-[plans/rename-mitroa-tables.md](plans/rename-mitroa-tables.md)).
+download under `files/mitroa/db_backups/`. **Committing it is what removes
+the copies**: on start, `db._drop_committed_backup_copies` drops every
+`mitroa_backup_<date>_*` table for which a `mitroa_db_<date or later>-*.zip`
+exists in that folder, and logs it. The archive includes the copies, so a zip
+from that day or later holds them; a copy nobody has downloaded yet stays.
+The 2026-09-15 snapshot is committed, so the first start after this code
+landed drops its copies.
 
 ### `mitroa_external_electors`
 

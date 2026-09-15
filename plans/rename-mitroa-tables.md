@@ -50,13 +50,18 @@ names is renamed on start with every row, constraint name and the sequence
 position intact, every write path still works, a second start is a no-op,
 and a fresh database comes up under the new names with no backup copies.
 
-## Follow-up
+## Aftermath
 
-1. In the app, as coordinator, open «Προετοιμασία 2026» → «Αντίγραφο
-   ασφαλείας της βάσης (CSV)», download the zip and commit it under
-   `files/mitroa/db_backups/`. It contains the three live tables and the
-   three `mitroa_backup_20260915_*` copies.
-2. Once that commit exists, the copies can be dropped. There is no UI for
-   it on purpose (a delete button next to a backup button invites the wrong
-   click); add a one-off `DROP TABLE` to `MIGRATIONS_SQL` guarded with
-   `IF EXISTS`, deploy, and remove it again.
+Deployed 2026-09-15 10:41 UTC (commit `a4e7ef7`); the log showed the rename
+line and the bootstrap table list with the six `mitroa_*` tables. The
+coordinator downloaded `mitroa_db_20260915-1343.zip` (2.937 electors rows,
+107 proposals, 1 year — each twice, live and copy) and committed it under
+`files/mitroa/db_backups/` (commit `44bb9ef`).
+
+The copies are not dropped by hand — there is deliberately no delete button
+next to a backup button. `db._drop_committed_backup_copies` drops a
+`mitroa_backup_<date>_*` table on start once a zip dated that day or later is
+committed in the folder, and logs it — so the first deploy carrying that
+function removes the 2026-09-15 copies. Confirm it in the deployment log:
+`[db.get_engine] Διαγράφηκαν αντίγραφα ασφαλείας …` followed by a bootstrap
+table list with three `mitroa_*` tables.

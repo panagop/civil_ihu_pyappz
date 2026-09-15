@@ -18,6 +18,7 @@ historical 2025 data are installed by the app itself on first start — see
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -153,8 +154,9 @@ TABLE_PREFIX = "mitroa_"
 # — a snapshot of the exact state before the change, kept inside the database
 # because nothing outside Railway can take one. Download it as CSV from the
 # coordinator section of the Προετοιμασία tab (backup_archive()) and commit it;
-# the copies can be dropped once that is done.
+# the copies are dropped by _drop_committed_backup_copies() once that is done.
 BACKUP_PREFIX = "mitroa_backup_20260915_"
+BACKUPS_DIR = ROOT / "files" / "mitroa" / "db_backups"
 
 # Applied after SCHEMA_SQL. CREATE TABLE IF NOT EXISTS will not touch a table
 # that already exists, so anything added to an existing installation has to go
@@ -207,11 +209,18 @@ def get_engine() -> Engine | None:
         from perigrammata_db import SCHEMA_SQL as PERIGRAMMATA_SCHEMA_SQL
 
         with engine.begin() as conn:
+            dropped = _drop_committed_backup_copies(conn)
             renamed = _rename_legacy_tables(conn)
             conn.execute(text(SCHEMA_SQL))
             conn.execute(text(MIGRATIONS_SQL))
             conn.execute(text(PERIGRAMMATA_SCHEMA_SQL))
             conn.execute(text(EUDOXUS_SCHEMA_SQL))
+        if dropped:
+            print(
+                "[db.get_engine] Διαγράφηκαν αντίγραφα ασφαλείας που υπάρχουν "
+                "πλέον στο αποθετήριο: " + ", ".join(dropped),
+                flush=True,
+            )
         if renamed:
             print(
                 "[db.get_engine] Μετονομάστηκαν πίνακες: " + ", ".join(renamed),
@@ -288,6 +297,39 @@ def _rename_legacy_tables(conn: Connection) -> list[str]:
             )
         renamed.append(f"{old} → {new}")
     return renamed
+
+
+def _drop_committed_backup_copies(conn: Connection) -> list[str]:
+    """Drop ``mitroa_backup_<date>_*`` copies once a zip from that day or later
+    is committed under ``files/mitroa/db_backups/``.
+
+    A copy exists only because nothing outside Railway can take a backup. The
+    archive :func:`backup_archive` produces includes every ``mitroa_*`` table,
+    copies included, so an archive dated on or after the copy holds it — and a
+    copy that is in the repository has no reason to stay in the database, where
+    it clutters the ``\\dt`` the rename was meant to tidy. Runs *before*
+    :func:`_rename_legacy_tables`, so a copy taken on this start survives until
+    it has been downloaded and committed. Returns what was dropped, for the log.
+    """
+    copies = conn.execute(
+        text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+            "AND tablename LIKE :pattern ORDER BY tablename"
+        ),
+        {"pattern": TABLE_PREFIX + "backup\\_%"},
+    ).scalars().all()
+    archives = [
+        match.group(1)
+        for path in BACKUPS_DIR.glob("mitroa_db_*.zip")
+        if (match := re.fullmatch(r"mitroa_db_(\d{8})-\d{4}\.zip", path.name))
+    ]
+    dropped: list[str] = []
+    for name in copies:
+        taken = re.match(rf"{TABLE_PREFIX}backup_(\d{{8}})_", name)
+        if taken and any(stamp >= taken.group(1) for stamp in archives):
+            conn.execute(text(f'DROP TABLE "{name}"'))
+            dropped.append(name)
+    return dropped
 
 
 def mitroa_tables() -> list[str]:

@@ -60,6 +60,17 @@ def server(tmp_path_factory):
     instance.cleanup()
 
 
+@pytest.fixture(autouse=True)
+def no_committed_archives(tmp_path, monkeypatch):
+    """Keep the repository's real backup zips out of the tests' way.
+
+    A committed archive makes the app drop the in-database copies on start;
+    the tests decide themselves when that should happen.
+    """
+    monkeypatch.setattr(db, "BACKUPS_DIR", tmp_path / "db_backups")
+    (tmp_path / "db_backups").mkdir()
+
+
 @pytest.fixture
 def database(server, request):
     """A new, empty database wired into ``db`` through ``DATABASE_URL``."""
@@ -252,6 +263,33 @@ def test_second_start_is_a_no_op(database, capsys):
     assert "Αποτυχία" not in out
     assert "Μετονομάστηκαν" not in out
     assert db.mitroa_tables() == before
+
+
+def test_copies_are_dropped_once_their_archive_is_committed(database, capsys):
+    install_legacy(database)
+    db.get_engine()
+    copies = [name for name in db.mitroa_tables() if name.startswith(db.BACKUP_PREFIX)]
+    assert len(copies) == 3
+
+    # An archive from before the copies were taken does not cover them.
+    (db.BACKUPS_DIR / "mitroa_db_20260101-0900.zip").write_bytes(b"")
+    db.get_engine.clear()
+    db.get_engine()
+    assert [n for n in db.mitroa_tables() if n.startswith(db.BACKUP_PREFIX)] == copies
+
+    # One from that day or later does, and the copies go — with a log line.
+    (db.BACKUPS_DIR / "mitroa_db_20260915-1343.zip").write_bytes(b"")
+    db.get_engine.clear()
+    capsys.readouterr()
+    db.get_engine()
+    out = capsys.readouterr().out
+    assert "Διαγράφηκαν αντίγραφα" in out
+    assert all(name in out for name in copies)
+    assert "Αποτυχία" not in out
+    assert db.mitroa_tables() == sorted(db.LEGACY_TABLES.values())
+    # The live tables were not touched.
+    assert db.stored_years() == [2025]
+    assert sorted(db.list_proposals(2026)["id"]) == [1, 2, 3]
 
 
 def test_backup_archive_holds_every_table(database):
