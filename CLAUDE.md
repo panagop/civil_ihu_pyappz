@@ -741,23 +741,42 @@ the 16 workbook rows with only a semester survive that way, and the
 Προετοιμασία tab lists them. Instructors and rooms are link tables: both are
 already many-to-one in the data (ΓΕΝ002 has two instructors, ΔΟΜ011 two rooms).
 
-**Names come from the περιγράμματα.** The row stores `curriculum` +
-`course_code`, and `load_term` joins `perigrammata_courses` — so the seed must
-run after the περιγράμματα one. The curriculum is stored rather than guessed
-because the department is mid-transition: `NEW_CURRICULUM_EXAMINA` says which
-εξάμηνα follow the 2025 programme in each year: 2025-26 the first year only
-(εξάμηνα 1–2), 2026-27 the first two (1–4), everything else 2018 — one year of
-study moves over per year (corrected 2026-09-15). Extend it when the next
-year moves over. `open_term` re-resolves the curriculum of every copied row
-by the rule of the *new* year — but only where that programme has the code
-**in the same εξάμηνο** (ΔΟΜ007 is 3rd in 2018 and 4th in 2025, so it must not
-flip) — so last winter's 3rd-εξάμηνο rows become 2025 rows in 2026-27 where
-they can. The rest keep their old curriculum and `off_programme` lists them in
-the Προετοιμασία tab for the coordinator to replace; nothing is dropped
-silently. `candidate_courses` uses the same rule to list
-what the programme offers for a period. ΔΟΜ004 sits in the 2nd εξάμηνο but is
-not in the 2025 programme; the seed falls back to 2018 for such codes and says
-so in the log.
+**A class is a course code, not a (programme, code) pair** (since
+2026-09-16). New courses of the 2025 programme got new codes and carried-over
+courses kept theirs, so the code identifies the course. Which programme an
+εξάμηνο follows in a given year is deliberately **not modelled**: in the
+transition courses may move between winter and spring, sooner or later, and
+nobody can say in advance. The former rule (`NEW_CURRICULUM_EXAMINA`,
+re-stamping on `open_term`, `off_programme`) is gone, and so is
+`timetable_classes.curriculum` — dropped by an `ALTER TABLE … DROP COLUMN IF
+EXISTS` at the end of the timetable `SCHEMA_SQL`, **not** in
+`db.MIGRATIONS_SQL`, which runs before the timetable schema and would fail on a
+fresh database. `perigrammata_courses.curriculum` stays: the περιγράμματα need it.
+
+- **Names come from the περιγράμματα, by code, the newest programme winning**
+  (`NEWEST_NAME_SQL`, a lateral join in `load_term`) — so the seed must run
+  after the περιγράμματα one. Of the 84 shared codes only ΣΥΓ017 changed its
+  name; the timetable prints the 2025 name everywhere, locked 2025-26 terms
+  included, while the περιγράμματα keep both. (Page 3 reads names from the
+  exams workbook, so there the new name is typed into the next file.)
+- **The row's εξάμηνο is the timetable's**, not the programme's: a course added
+  while editing the 3rd εξάμηνο sits in the 3rd whatever either programme says.
+  20 shared codes changed εξάμηνο, 19 of them to the other period.
+- **What the Προετοιμασία tab offers** is `course_catalogue` (one row per code:
+  newest name, `examina` = `{2018: 3, 2025: 4}`, `in_term`), filtered by the pure
+  `courses_for_semester`: by default every code **either** programme places in
+  the selected εξάμηνο (ΔΟΜ007 appears under both 3 and 4); the toggle
+  «Δυνατότητα επιλογής από όλα τα εξάμηνα» offers every code of both periods.
+  Each option carries `examina_label` («εξ. 3 στο 2018 · εξ. 4 στο 2025»).
+- **The toggle and the course selectbox sit above the «Νέα γραμμή» form, inside
+  an `@st.fragment`.** Above the form because they change what the form offers
+  and a widget in a form does not rerun until submit (the page-5 elector trap);
+  a fragment because page 8 caches nothing, so a full rerun would repeat
+  `load_term`, staff, rooms and the conflict check on every flip. A successful
+  add calls `st.rerun()`, whose default scope is the whole app, so the table
+  and the week above refresh.
+- The seed stores codes only and lists any code no περίγραμμα has in its log
+  line; `load_term` prints «(άγνωστο μάθημα)» for it.
 
 `name_suffix` keeps the «ΔΥ, ΥΕ» marker the workbook wrote after elective
 titles, and `display_name` prints it after the περίγραμμα name. It also drives

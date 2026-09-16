@@ -37,14 +37,11 @@ from timetable_db import (
     CLASSES_TABLE,
     DAY_NUMBER,
     LOCKED,
-    NEW_CURRICULUM,
-    OLD_CURRICULUM,
     PERIODS,
     ROOMS_TABLE,
     STAFF_TABLE,
     STAFF_TERMS_TABLE,
     TERMS_TABLE,
-    curriculum_for,
     period_for,
 )
 
@@ -123,7 +120,7 @@ def split_name(course_name) -> tuple[str, str | None]:
     return name[: match.start()].strip(), suffix
 
 
-def read_workbook(path: Path, year: int) -> list[dict]:
+def read_workbook(path: Path) -> list[dict]:
     """One dict per workbook row, with codes resolved and nothing joined yet."""
     frame = pd.read_excel(path, sheet_name=SHEET_NAME)
     rows = []
@@ -138,7 +135,6 @@ def read_workbook(path: Path, year: int) -> list[dict]:
         record = {
             "examino": examino,
             "course_code": code,
-            "curriculum": curriculum_for(year, examino),
             "section": SECTION_ALIASES.get(_clean(row.get("class_name")), _clean(row.get("class_name")) or "Θ"),
             "name_suffix": suffix,
             "period": period or None,
@@ -220,7 +216,7 @@ def seed_timetable(engine: Engine) -> str:
         if already:
             skipped.append(str(year))
             continue
-        rows = read_workbook(path, year)
+        rows = read_workbook(path)
         counts = _insert_year(engine, year, rows)
         loaded.append(f"{year}-{str(year + 1)[-2:]} ({counts})")
 
@@ -239,9 +235,9 @@ def _insert_year(engine: Engine, year: int, rows: list[dict]) -> str:
         }
         room_codes = {row[0] for row in conn.execute(text(f"SELECT code FROM {ROOMS_TABLE}"))}
         known = {
-            (row[0], row[1])
+            row[0]
             for row in conn.execute(
-                text(f"SELECT curriculum, code FROM {PERIGRAMMATA_TABLE} WHERE locale = 'gr'")
+                text(f"SELECT DISTINCT code FROM {PERIGRAMMATA_TABLE} WHERE locale = 'gr'")
             )
         }
         for period in PERIODS:
@@ -252,7 +248,7 @@ def _insert_year(engine: Engine, year: int, rows: list[dict]) -> str:
                 ),
                 {"year": year, "period": period, "status": LOCKED},
             )
-        fallbacks, placed = 0, 0
+        unknown_codes, placed = set(), 0
         for row in rows:
             missing = [name for name in row["instructors"] if name not in staff_ids]
             if missing:
@@ -260,24 +256,21 @@ def _insert_year(engine: Engine, year: int, rows: list[dict]) -> str:
             unknown_rooms = [code for code in row["rooms"] if code not in room_codes]
             if unknown_rooms:
                 raise ValueError(f"Άγνωστη αίθουσα: {unknown_rooms}")
-            # The rule says which programme an εξάμηνο follows; a code the
-            # programme does not carry (ΔΟΜ004 in 2025) is taken from the other.
-            if known and (row["curriculum"], row["course_code"]) not in known:
-                other = OLD_CURRICULUM if row["curriculum"] == NEW_CURRICULUM else NEW_CURRICULUM
-                if (other, row["course_code"]) in known:
-                    row["curriculum"] = other
-                    fallbacks += 1
+            # A class is a code; its name is looked up on read, so a code no
+            # περίγραμμα has is kept (it prints «(άγνωστο μάθημα)») and reported.
+            if known and row["course_code"] not in known:
+                unknown_codes.add(row["course_code"])
             # An unplaced row has no period in the workbook; it belongs to the
             # period its εξάμηνο runs in.
             period = row["period"] or period_for(row["examino"])
             class_id = conn.execute(
                 text(
-                    f"INSERT INTO {CLASSES_TABLE} (year, period, examino, course_code, curriculum, "
+                    f"INSERT INTO {CLASSES_TABLE} (year, period, examino, course_code, "
                     "section, name_suffix, day, start_hour, duration, notes, updated_by) "
-                    "VALUES (:year, :period, :examino, :course_code, :curriculum, :section, "
+                    "VALUES (:year, :period, :examino, :course_code, :section, "
                     ":name_suffix, :day, :start_hour, :duration, :notes, 'seed') RETURNING id"
                 ),
-                {**{k: row[k] for k in ("examino", "course_code", "curriculum", "section",
+                {**{k: row[k] for k in ("examino", "course_code", "section",
                                         "name_suffix", "day", "start_hour", "duration", "notes")},
                  "year": year, "period": period},
             ).scalar_one()
@@ -316,6 +309,6 @@ def _insert_year(engine: Engine, year: int, rows: list[dict]) -> str:
             {"year": year},
         )
     note = f"{len(rows)} γραμμές, {placed} με ώρα"
-    if fallbacks:
-        note += f", {fallbacks} από το άλλο πρόγραμμα"
+    if unknown_codes:
+        note += ", χωρίς περίγραμμα: " + ", ".join(sorted(unknown_codes))
     return note

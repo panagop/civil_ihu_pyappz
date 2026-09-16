@@ -347,34 +347,6 @@ with tab_prepare:
     summary["Χωρίς ώρα"] = summary["Γραμμές"] - summary["Με ώρα"]
     st.dataframe(summary, width="stretch")
 
-    # Only the rows the new programme cannot take over: a course it has under
-    # the same code and εξάμηνο is simply re-stamped below, not reported.
-    index = tdb.programme_examina()
-    retaggable = tdb.retaggable(df, year, index)
-    if coordinator and editable and not retaggable.empty:
-        st.info(
-            f"{len(retaggable)} γραμμές διδάσκονται και στα δύο προγράμματα με τον ίδιο "
-            "κωδικό και εξάμηνο, αλλά είναι ακόμη καταχωρημένες στο παλιό."
-        )
-        if st.button("Ενημέρωση προγράμματος σπουδών", key="retag_curricula"):
-            moved = tdb.retag_curricula(year, period, user_email)
-            st.success(f"Ενημερώθηκαν {moved} γραμμές.")
-            st.rerun()
-
-    stale = tdb.off_programme(df, year, index)
-    if not stale.empty:
-        st.warning(
-            f"{len(stale)} γραμμές είναι μαθήματα που το πρόγραμμα σπουδών του εξαμήνου "
-            "τους φέτος δεν περιλαμβάνει (μεταφέρθηκαν από πέρυσι). "
-            "Αντικαταστήστε τις με τα μαθήματα του σωστού προγράμματος."
-        )
-        st.dataframe(
-            stale[["examino", "curriculum", "course_code", "display_name", "section", "day", "start_time"]]
-            .rename(columns={**DISPLAY_COLUMNS, "curriculum": "Πρόγραμμα"}),
-            width="stretch",
-            hide_index=True,
-        )
-
     if not coordinator:
         st.info("Οι αλλαγές γίνονται από τους συντονιστές (`coordinator_emails`).")
     elif not editable:
@@ -404,11 +376,11 @@ with tab_prepare:
         rooms_frame = tdb.load_rooms(active_only=True)
         room_options = list(rooms_frame["code"])
         room_names = dict(zip(rooms_frame["code"], rooms_frame["name"]))
-        candidates = tdb.candidate_courses(year, period)
+        catalogue = tdb.course_catalogue(year, period)
 
         st.markdown("#### Επεξεργασία ανά εξάμηνο")
         semesters = sorted(
-            {int(s) for s in df["examino"].unique()} | {int(s) for s in candidates["examino"].unique()}
+            {int(s) for s in df["examino"].unique()} | tdb.programme_semesters(catalogue, period)
         )
         semester = st.selectbox(
             "Εξάμηνο σπουδών:", options=semesters, format_func=lambda s: f"Εξάμηνο {s}", key="edit_semester"
@@ -417,28 +389,28 @@ with tab_prepare:
         st.dataframe(to_display(subset), width="stretch", hide_index=True)
         render_week(subset, f"edit_week_{year}_{period}_{semester}", title_with_room)
 
-        not_in_term = candidates[(candidates["examino"] == semester) & ~candidates["in_term"]]
-        if not not_in_term.empty:
-            with st.expander(f"Μαθήματα του προγράμματος σπουδών που λείπουν ({len(not_in_term)})"):
+        # Codes either programme places in this εξάμηνο that the term has
+        # nowhere — a course may run a period early or late in the transition.
+        offered = tdb.courses_for_semester(catalogue, semester)
+        missing = offered[~offered["in_term"]]
+        if not missing.empty:
+            programmes = sorted({c for examina in catalogue["examina"] for c in examina})
+            with st.expander(f"Μαθήματα του εξαμήνου που λείπουν ({len(missing)})"):
+                st.caption("Από όλα τα προγράμματα σπουδών που έχουν μάθημα σε αυτό το εξάμηνο.")
                 st.dataframe(
-                    not_in_term[["curriculum", "course_code", "course_name"]].rename(
-                        columns={"curriculum": "Πρόγραμμα", "course_code": "Κωδικός", "course_name": "Μάθημα"}
+                    pd.DataFrame(
+                        {
+                            "Κωδικός": missing["course_code"],
+                            "Μάθημα": missing["course_name"],
+                            **{
+                                f"Εξάμηνο {c}": pd.array([e.get(c) for e in missing["examina"]], dtype="Int64")
+                                for c in programmes
+                            },
+                        }
                     ),
                     width="stretch",
                     hide_index=True,
                 )
-
-        # Course choices: what the term already has for this εξάμηνο, plus
-        # what the curriculum offers and the term does not have yet.
-        course_choices: dict[str, tuple[str, int, str]] = {}
-        for _, row in subset.drop_duplicates(["course_code", "curriculum"]).iterrows():
-            course_choices[f"{row['course_code']} — {row['course_name']}"] = (
-                row["course_code"], int(row["curriculum"]), row["name_suffix"])
-        for _, row in not_in_term.iterrows():
-            course_choices.setdefault(
-                f"{row['course_code']} — {row['course_name']} (νέο)",
-                (row["course_code"], int(row["curriculum"]), ""),
-            )
 
         def placement_fields(prefix: str, row=None) -> tuple:
             is_placed = st.checkbox(
@@ -467,34 +439,63 @@ with tab_prepare:
 
         sections = ["Θ", "Ε", "Ε1", "Ε2", "Ε3", "Ε4", "Φ"]
 
-        st.markdown("#### Νέα γραμμή")
-        with st.form("add_class", clear_on_submit=False):
-            choice = st.selectbox("Μάθημα:", options=list(course_choices), key="add_course")
-            c1, c2 = st.columns(2)
-            section = c1.selectbox("Τμήμα:", options=sections, key="add_section")
-            suffix = c2.text_input("Ένδειξη μετά τον τίτλο (π.χ. ΔΥ, ΥΕ):", key="add_suffix")
-            instructors = st.multiselect(
-                "Διδάσκοντες:", options=staff_options, format_func=lambda i: staff_names[i], key="add_staff"
-            )
-            rooms = st.multiselect(
-                "Αίθουσες:", options=room_options,
-                format_func=lambda c: f"{c} — {room_names[c]}", key="add_rooms",
-            )
-            day, start, duration = placement_fields("add")
-            notes = st.text_input("Παρατηρήσεις:", key="add_notes")
-            if st.form_submit_button("Προσθήκη", type="primary"):
-                code, curriculum, default_suffix = course_choices[choice]
-                error = tdb.add_class(
-                    year, period, examino=semester, course_code=code, curriculum=curriculum,
-                    section=section, instructor_ids=instructors, room_codes=rooms,
-                    day=day, start_hour=start, duration=duration,
-                    name_suffix=suffix or default_suffix, notes=notes, author=user_email,
+        @st.fragment
+        def add_class_section(semester: int, subset: pd.DataFrame) -> None:
+            """«Νέα γραμμή». A fragment, so flipping the toggle reruns only this
+            section and not the whole page (which caches nothing)."""
+            st.markdown("#### Νέα γραμμή")
+            # The toggle and the course sit above the form on purpose: both
+            # change what is offered below, and a widget inside a form does
+            # not rerun until submit.
+            all_semesters = st.toggle("Δυνατότητα επιλογής από όλα τα εξάμηνα", key="add_all_semesters")
+            offered = tdb.courses_for_semester(catalogue, semester, all_semesters)
+
+            # label -> (code, suffix to start from). What this εξάμηνο already
+            # has comes first; then what the programmes offer, with where each
+            # programme places it.
+            choices: dict[str, tuple[str, str]] = {}
+            for _, row in subset.drop_duplicates("course_code").iterrows():
+                choices[f"{row['course_code']} — {row['course_name']}"] = (row["course_code"], row["name_suffix"])
+            present = set(subset["course_code"])
+            for _, row in offered[~offered["course_code"].isin(present)].iterrows():
+                hint = tdb.examina_label(row["examina"]) + ("" if row["in_term"] else " · νέο")
+                choices[f"{row['course_code']} — {row['course_name']} ({hint})"] = (row["course_code"], "")
+            if not choices:
+                st.info("Κανένα μάθημα για επιλογή· ενεργοποιήστε την επιλογή από όλα τα εξάμηνα.")
+                return
+
+            choice = st.selectbox("Μάθημα:", options=list(choices), key="add_course")
+            code, default_suffix = choices[choice]
+            with st.form("add_class", clear_on_submit=False):
+                c1, c2 = st.columns(2)
+                section = c1.selectbox("Τμήμα:", options=sections, key="add_section")
+                # Keyed by course so a new choice brings its own marker.
+                suffix = c2.text_input(
+                    "Ένδειξη μετά τον τίτλο (π.χ. ΔΥ, ΥΕ):", value=default_suffix, key=f"add_suffix_{code}"
                 )
-                if error:
-                    st.error(error)
-                else:
-                    st.success("Προστέθηκε.")
-                    st.rerun()
+                instructors = st.multiselect(
+                    "Διδάσκοντες:", options=staff_options, format_func=lambda i: staff_names[i], key="add_staff"
+                )
+                rooms = st.multiselect(
+                    "Αίθουσες:", options=room_options,
+                    format_func=lambda c: f"{c} — {room_names[c]}", key="add_rooms",
+                )
+                day, start, duration = placement_fields("add")
+                notes = st.text_input("Παρατηρήσεις:", key="add_notes")
+                if st.form_submit_button("Προσθήκη", type="primary"):
+                    error = tdb.add_class(
+                        year, period, examino=semester, course_code=code,
+                        section=section, instructor_ids=instructors, room_codes=rooms,
+                        day=day, start_hour=start, duration=duration,
+                        name_suffix=suffix, notes=notes, author=user_email,
+                    )
+                    if error:
+                        st.error(error)
+                    else:
+                        st.success("Προστέθηκε.")
+                        st.rerun()  # the whole app: the table and week above change too
+
+        add_class_section(semester, subset)
 
         st.markdown("#### Μεταβολή ή διαγραφή γραμμής")
         if subset.empty:
@@ -502,9 +503,11 @@ with tab_prepare:
         else:
             # Outside the form on purpose: a widget inside one does not rerun
             # until submit, so the fields below would show the previous row.
-            labels = {int(r["id"]): class_label(r) for _, r in subset.iterrows()}
+            # Not `labels`: the staff tab below rebinds that name, and this
+            # format_func would then look ids up in the staff column labels.
+            class_labels = {int(r["id"]): class_label(r) for _, r in subset.iterrows()}
             class_id = st.selectbox(
-                "Γραμμή:", options=list(labels), format_func=lambda i: labels[i], key="edit_class"
+                "Γραμμή:", options=list(class_labels), format_func=lambda i: class_labels[i], key="edit_class"
             )
             row = subset[subset["id"] == class_id].iloc[0]
             prefix = f"edit_{class_id}"

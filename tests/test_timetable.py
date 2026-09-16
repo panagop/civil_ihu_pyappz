@@ -30,7 +30,7 @@ WORKBOOK = seed.WORKBOOKS[2025]
 
 @pytest.fixture(scope="module")
 def rows():
-    return seed.read_workbook(WORKBOOK, 2025)
+    return seed.read_workbook(WORKBOOK)
 
 
 def test_workbook_counts(rows):
@@ -61,13 +61,55 @@ def test_name_suffix():
     assert seed.split_name("Φυσική για Μηχανικούς") == ("Φυσική για Μηχανικούς", None)
 
 
-def test_curriculum_rule():
-    assert tdb.curriculum_for(2026, 1) == 2025
-    assert tdb.curriculum_for(2026, 4) == 2025
-    assert tdb.curriculum_for(2026, 5) == 2018
-    assert tdb.curriculum_for(2025, 3) == 2018
-    assert tdb.curriculum_for(2024, 1) == 2018
+def test_period_for():
     assert tdb.period_for(1) == tdb.WINTER and tdb.period_for(8) == tdb.SPRING
+
+
+def _programmes():
+    """(curriculum, code, name, εξάμηνο) rows shaped like perigrammata_courses."""
+    return pd.DataFrame(
+        [
+            (2018, "ΔΟΜ007", "Οικοδομική Ι", 3),
+            (2025, "ΔΟΜ007", "Οικοδομική Ι", 4),          # moved to spring
+            (2018, "ΣΥΓ017", "Οργάνωση Εργοταξίου", 9),
+            (2025, "ΣΥΓ017", "Προγραμματισμός Έργων", 9),  # renamed
+            (2018, "ΔΟΜ004", "Τεχνική Μηχανική Ι", 2),     # 2018 only
+            (2025, "ΓΕΝ099", "Νέο μάθημα", 3),             # 2025 only
+            (2018, "ΧΧΧ001", "Χωρίς εξάμηνο", None),
+        ],
+        columns=["curriculum", "course_code", "course_name", "examino"],
+    )
+
+
+def test_catalogue_is_one_row_per_code_with_the_newest_name():
+    catalogue = tdb.build_catalogue(_programmes()).set_index("course_code")
+    assert catalogue.index.is_unique and len(catalogue) == 5
+    assert catalogue.loc["ΣΥΓ017", "course_name"] == "Προγραμματισμός Έργων"
+    assert catalogue.loc["ΔΟΜ004", "course_name"] == "Τεχνική Μηχανική Ι"
+    assert catalogue.loc["ΔΟΜ007", "examina"] == {2018: 3, 2025: 4}
+    assert catalogue.loc["ΧΧΧ001", "examina"] == {}
+
+
+def test_courses_for_semester():
+    catalogue = tdb.build_catalogue(_programmes())
+
+    def codes(semester, all_semesters=False):
+        return set(tdb.courses_for_semester(catalogue, semester, all_semesters)["course_code"])
+
+    # Either programme's εξάμηνο counts: ΔΟΜ007 is offered in the 3rd and the 4th.
+    assert codes(3) == {"ΔΟΜ007", "ΓΕΝ099"}
+    assert codes(4) == {"ΔΟΜ007"}
+    assert codes(9) == {"ΣΥΓ017"}
+    # The toggle offers everything, both periods, even a course with no εξάμηνο.
+    assert codes(3, all_semesters=True) == set(catalogue["course_code"])
+    assert tdb.programme_semesters(catalogue, tdb.WINTER) == {3, 9}
+    assert tdb.programme_semesters(catalogue, tdb.SPRING) == {2, 4}
+
+
+def test_examina_label():
+    assert tdb.examina_label({2018: 3, 2025: 4}) == "εξ. 3 στο 2018 · εξ. 4 στο 2025"
+    assert tdb.examina_label({2018: 9, 2025: 9}) == "εξ. 9"
+    assert tdb.examina_label({}) == "χωρίς εξάμηνο"
 
 
 def _frame(specs):
@@ -77,7 +119,7 @@ def _frame(specs):
     for i, examino, code, section, day, start, duration, rooms, staff, *suffix in specs:
         records.append(
             {
-                "id": i, "examino": examino, "course_code": code, "curriculum": 2018,
+                "id": i, "examino": examino, "course_code": code,
                 "section": section, "name_suffix": suffix[0] if suffix else None, "day": day, "start_hour": start,
                 "duration": duration, "notes": None, "updated_by": None, "updated_at": None,
                 "course_name": code, "instructors": ", ".join(f"S{s}" for s in staff),
@@ -195,9 +237,13 @@ def test_seed_makes_two_locked_terms(database):
     # Names resolve from the περιγράμματα for every row
     assert not (winter["course_name"] == "(άγνωστο μάθημα)").any()
     assert not (spring["course_name"] == "(άγνωστο μάθημα)").any()
-    # ΔΟΜ004 is not in the 2025 programme and fell back to 2018
+    # Names by code, newest programme first: ΔΟΜ004 exists only in 2018, and
+    # ΣΥΓ017 prints its 2025 name even in a 2025-26 term.
+    assert "curriculum" not in winter.columns
     dom004 = spring[spring["course_code"] == "ΔΟΜ004"].iloc[0]
-    assert dom004["curriculum"] == 2018
+    assert dom004["course_name"] == "Τεχνική Μηχανική Ι"
+    syg017 = winter[winter["course_code"] == "ΣΥΓ017"].iloc[0]
+    assert syg017["course_name"] == "Προγραμματισμός και Διαχείριση Τεχνικών Έργων"
     # ΔΟΜ011 kept both rooms, ΓΕΝ002 both instructors in workbook order
     dom011 = winter[winter["course_code"] == "ΔΟΜ011"].iloc[0]
     assert dom011["room_codes"] == ["207", "ΤΣ1"]
@@ -239,42 +285,10 @@ def test_open_copy_edit_and_lock(database):
     assert len(copied) == len(original)
     assert copied["instructors"].tolist() == original["instructors"].tolist()
     assert copied["room_codes"].tolist() == original["room_codes"].tolist()
-    # 2026-27 runs the 2025 programme in εξάμηνα 1–4: the copied 3rd-εξάμηνο
-    # rows move to it where the code exists there, and their names resolve.
-    third = copied[copied["examino"] == 3]
-    assert (third["curriculum"] == 2025).any()
-    assert not (third["course_name"] == "(άγνωστο μάθημα)").any()
-    assert (copied[copied["examino"] >= 5]["curriculum"] == 2018).all()
-    # ΔΟΜ007 is 3rd in 2018 but 4th in 2025: it must not be re-resolved, and
-    # it is reported as off-programme together with the codes 2025 lacks.
-    dom007 = third[third["course_code"] == "ΔΟΜ007"]
-    assert (dom007["curriculum"] == 2018).all()
-    # ΓΕΝ007 is 3rd in both programmes, so it is not a problem to report.
-    stale = tdb.off_programme(copied, 2026)
-    assert set(stale["course_code"]) >= {"ΔΟΜ007", "ΔΟΜ006", "ΔΟΜ008", "ΥΔΡ001"}
-    assert "ΓΕΝ007" not in set(stale["course_code"])
-    assert (stale["examino"] == 3).all()
-    assert tdb.off_programme(tdb.load_term(2025, tdb.WINTER), 2025).empty
-    # A term copied before the transition rule moved εξάμηνα 3–4 onto the 2025
-    # programme carries stale stamps: retag_curricula moves exactly those, and
-    # leaves the ones off_programme reports.
-    with db.get_engine().begin() as conn:
-        conn.execute(
-            sa_text(
-                f"UPDATE {tdb.CLASSES_TABLE} SET curriculum = 2018 "
-                "WHERE year = 2026 AND period = :p"
-            ),
-            {"p": tdb.WINTER},
-        )
-    reverted = tdb.load_term(2026, tdb.WINTER)
-    assert not tdb.retaggable(reverted, 2026).empty
-    moved = tdb.retag_curricula(2026, tdb.WINTER, "c@ihu.gr")
-    assert moved > 0
-    retagged = tdb.load_term(2026, tdb.WINTER)
-    assert tdb.retaggable(retagged, 2026).empty
-    assert set(tdb.off_programme(retagged, 2026)["course_code"]) == set(stale["course_code"])
-    assert (retagged[retagged["course_code"] == "ΔΟΜ007"]["curriculum"] == 2018).all()
-    assert (retagged[retagged["course_code"] == "ΓΕΝ007"]["curriculum"] == 2025).all()
+    # A copy is the same courses, same εξάμηνα, same names.
+    assert copied["course_code"].tolist() == original["course_code"].tolist()
+    assert copied["examino"].tolist() == original["examino"].tolist()
+    assert copied["course_name"].tolist() == original["course_name"].tolist()
     # The copy carries last winter's activity
     active = tdb.staff_for_term(2026, tdb.WINTER)
     assert bool(active[active["short_name"] == "Κίρτας"]["active"].iloc[0])
@@ -282,16 +296,16 @@ def test_open_copy_edit_and_lock(database):
     staff = tdb.load_staff()
     kirtas = int(staff[staff["short_name"] == "Κίρτας"]["id"].iloc[0])
     assert tdb.add_class(
-        2026, tdb.WINTER, examino=1, course_code="ΓΕΝ001", curriculum=2025, section="Φ",
+        2026, tdb.WINTER, examino=1, course_code="ΓΕΝ001", section="Φ",
         instructor_ids=[kirtas], room_codes=["301"], day=1, start_hour=9, duration=1,
         author="c@ihu.gr",
     ) == ""
     assert "τελειώνει" in tdb.add_class(
-        2026, tdb.WINTER, examino=1, course_code="ΓΕΝ001", curriculum=2025, section="Θ",
+        2026, tdb.WINTER, examino=1, course_code="ΓΕΝ001", section="Θ",
         instructor_ids=[], room_codes=[], day=1, start_hour=20, duration=3, author="c@ihu.gr",
     )
     assert "τμήμα" in tdb.add_class(
-        2026, tdb.WINTER, examino=1, course_code="ΓΕΝ001", curriculum=2025, section="Χ",
+        2026, tdb.WINTER, examino=1, course_code="ΓΕΝ001", section="Χ",
         instructor_ids=[], room_codes=[], day=None, start_hour=None, duration=None, author="c@ihu.gr",
     )
     term = tdb.load_term(2026, tdb.WINTER)
@@ -306,10 +320,23 @@ def test_open_copy_edit_and_lock(database):
     assert (problems["Είδος"] == tdb.STAFF_CONFLICT).any()
     assert tdb.delete_class(int(added["id"]), "c@ihu.gr") == ""
 
-    candidates = tdb.candidate_courses(2026, tdb.WINTER)
-    assert set(candidates["examino"].unique()) <= {1, 3, 5, 7, 9}
-    assert (candidates[candidates["examino"] <= 4]["curriculum"] == 2025).all()
-    assert (candidates[candidates["examino"] >= 5]["curriculum"] == 2018).all()
+    # What the arranging tab offers: by code, from both programmes. ΔΟΜ007
+    # (3rd in 2018, 4th in 2025) is in the term already; ΥΔΡ002 (4th in 2018,
+    # 3rd in 2025) is a spring course last year and is offered for the 3rd now.
+    catalogue = tdb.course_catalogue(2026, tdb.WINTER)
+    assert catalogue["course_code"].is_unique
+    third = tdb.courses_for_semester(catalogue, 3).set_index("course_code")
+    assert bool(third.loc["ΔΟΜ007", "in_term"])
+    assert not bool(third.loc["ΥΔΡ002", "in_term"])
+    assert tdb.programme_semesters(catalogue, tdb.WINTER) <= {1, 3, 5, 7, 9}
+    # Any code can go into any εξάμηνο of the term, and its name resolves.
+    assert tdb.add_class(
+        2026, tdb.WINTER, examino=3, course_code="ΥΔΡ002", section="Θ",
+        instructor_ids=[], room_codes=[], day=None, start_hour=None, duration=None, author="c@ihu.gr",
+    ) == ""
+    term = tdb.load_term(2026, tdb.WINTER)
+    moved = term[term["course_code"] == "ΥΔΡ002"].iloc[0]
+    assert moved["examino"] == 3 and moved["course_name"] == "Μηχανική των Ρευστών"
 
     assert tdb.lock_term(2026, tdb.WINTER, "c@ihu.gr") == ""
     assert not tdb.open_terms()
@@ -333,3 +360,47 @@ def test_page_renders(database):
     assert not app.error, [e.value for e in app.error]
     assert len(app.tabs) == 8
     assert app.selectbox[0].label == "Εξάμηνο:"
+
+
+def test_curriculum_column_is_dropped_on_start(database):
+    """An installation from before 2026-09-16 still has the column; starting drops it."""
+    engine = db.get_engine()
+    with engine.begin() as conn:
+        conn.execute(sa_text(f"ALTER TABLE {tdb.CLASSES_TABLE} ADD COLUMN IF NOT EXISTS curriculum INTEGER"))
+    engine.dispose()
+    db.get_engine.clear()
+    engine = db.get_engine()
+    with engine.connect() as conn:
+        columns = {
+            row[0]
+            for row in conn.execute(
+                sa_text("SELECT column_name FROM information_schema.columns WHERE table_name = :t"),
+                {"t": tdb.CLASSES_TABLE},
+            )
+        }
+    assert "course_code" in columns and "curriculum" not in columns
+    assert not tdb.load_term(2025, tdb.WINTER).empty
+
+
+def test_page_toggle_offers_every_semester(database, monkeypatch):
+    """A coordinator on an open term: the toggle widens the course list."""
+    import auth
+    from streamlit.testing.v1 import AppTest
+
+    if not tdb.open_terms():
+        assert tdb.open_term(2026, tdb.SPRING, 2025, tdb.SPRING, "c@ihu.gr") == ""
+    monkeypatch.setattr(auth, "is_authorized", lambda: True)
+    monkeypatch.setattr(db, "is_coordinator", lambda email: True)
+
+    page = ROOT / "streamlit" / "app_pages" / "8_🗓_timetable_v2.py"
+    app = AppTest.from_file(str(page), default_timeout=300)
+    app.run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+    default = list(app.selectbox(key="add_course").options)
+    assert default
+    app.toggle(key="add_all_semesters").set_value(True).run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+    widened = list(app.selectbox(key="add_course").options)
+    assert len(widened) > len(default)
+    # Winter courses are offered in a spring term once the toggle is on.
+    assert any(option.startswith("ΔΟΜ007 ") for option in widened)

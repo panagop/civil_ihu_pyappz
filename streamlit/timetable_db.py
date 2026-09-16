@@ -26,11 +26,17 @@ Tables (all ``timetable_*`` so an admin's ``\\dt`` shows them as one group):
   ΔΟΜ011).
 - ``timetable_changes`` — who did what in an open term.
 
-Course names are **not** stored: ``curriculum`` + ``course_code`` resolve them
-from ``perigrammata_courses``. The curriculum is stored on the row rather than
-looked up ("try 2025, then 2018") so a name resolves deterministically. The
-only name-ish thing kept here is ``name_suffix``, the «ΔΥ, ΥΕ» elective-group
-marker the printed timetable carries after the course name.
+A class is a **course code**, not a (programme, code) pair. The department
+gave every course new to the 2025 programme a new code and kept the code of
+every course that carried over, so the code alone identifies the course.
+Which programme an εξάμηνο follows in a given year is deliberately not
+modelled (dropped 2026-09-16): during the transition courses may move between
+winter and spring, and nobody can say in advance when. Names come from
+``perigrammata_courses`` by code, the newest programme that has it winning
+(``NEWEST_NAME_SQL``) — so ΣΥΓ017 prints its 2025 name everywhere, while the
+περιγράμματα keep both. The only name-ish thing kept here is ``name_suffix``,
+the «ΔΥ, ΥΕ» elective-group marker the printed timetable carries after the
+course name.
 """
 
 from __future__ import annotations
@@ -76,21 +82,6 @@ MAX_DURATION = 6
 ADD, MODIFY, DELETE = "ΠΡΟΣΘΗΚΗ", "ΜΕΤΑΒΟΛΗ", "ΔΙΑΓΡΑΦΗ"
 OPENED, LOCKED_ACTION = "ΑΝΟΙΓΜΑ", "ΚΛΕΙΔΩΜΑ"
 ACTIONS = (ADD, MODIFY, DELETE, OPENED, LOCKED_ACTION)
-
-# Which εξάμηνα follow the 2025 programme in a given academic year; the rest
-# follow 2018. The department is mid-transition, one year of study per year:
-# 2025-26 ran the new programme in the first year only, 2026-27 runs it in the
-# first two (εξάμηνα 1–4; corrected 2026-09-15). Extend the tuple when the
-# next year moves over. Years not listed are entirely 2018.
-NEW_CURRICULUM_EXAMINA: dict[int, tuple[int, ...]] = {
-    2025: (1, 2),
-    2026: (1, 2, 3, 4),
-}
-OLD_CURRICULUM, NEW_CURRICULUM = 2018, 2025
-
-
-def curriculum_for(year: int, examino: int) -> int:
-    return NEW_CURRICULUM if examino in NEW_CURRICULUM_EXAMINA.get(year, ()) else OLD_CURRICULUM
 
 
 def period_for(examino: int) -> str:
@@ -159,7 +150,6 @@ CREATE TABLE IF NOT EXISTS {CLASSES_TABLE} (
     period      TEXT    NOT NULL,
     examino     INTEGER NOT NULL CHECK (examino BETWEEN 1 AND 10),
     course_code TEXT    NOT NULL,
-    curriculum  INTEGER NOT NULL,
     section     TEXT    NOT NULL,
     name_suffix TEXT,
     day         INTEGER CHECK (day BETWEEN 1 AND 5),
@@ -203,6 +193,11 @@ CREATE TABLE IF NOT EXISTS {CHANGES_TABLE} (
 
 CREATE INDEX IF NOT EXISTS timetable_changes_term_idx
     ON {CHANGES_TABLE} (year, period, created_at DESC);
+
+-- Migrations. Here rather than in db.MIGRATIONS_SQL, which runs before this
+-- schema: on a fresh database the table would not exist yet.
+-- 2026-09-16: a class is a course code; the programme stamp is gone.
+ALTER TABLE {CLASSES_TABLE} DROP COLUMN IF EXISTS curriculum;
 """
 
 
@@ -300,37 +295,19 @@ def open_term(
                 params,
             )
         ]
-        # A copied row follows the programme its εξάμηνο runs on in the *new*
-        # year — the transition moves one year of study forward each year, so
-        # last winter's 3rd-εξάμηνο rows (2018) become 2025 rows in 2026-27.
-        # `_retagged` holds the rule; what it leaves alone is `off_programme`.
-        known = _programme_examina(conn)
         mapping: dict[int, int] = {}
-        moved = 0
         for old_id in old_ids:
-            new_id = conn.execute(
+            mapping[old_id] = conn.execute(
                 text(
                     f"INSERT INTO {CLASSES_TABLE} "
-                    "(year, period, examino, course_code, curriculum, section, "
+                    "(year, period, examino, course_code, section, "
                     " name_suffix, day, start_hour, duration, notes, updated_by) "
-                    "SELECT :year, :period, examino, course_code, curriculum, section, "
+                    "SELECT :year, :period, examino, course_code, section, "
                     "       name_suffix, day, start_hour, duration, notes, :by "
                     f"FROM {CLASSES_TABLE} WHERE id = :old_id RETURNING id"
                 ),
                 {**params, "old_id": old_id},
             ).scalar_one()
-            mapping[old_id] = new_id
-            examino, code, curriculum = conn.execute(
-                text(f"SELECT examino, course_code, curriculum FROM {CLASSES_TABLE} WHERE id = :id"),
-                {"id": new_id},
-            ).one()
-            wanted = _retagged(examino, code, curriculum, year, known)
-            if wanted is not None:
-                conn.execute(
-                    text(f"UPDATE {CLASSES_TABLE} SET curriculum = :c WHERE id = :id"),
-                    {"c": wanted, "id": new_id},
-                )
-                moved += 1
         for old_id, new_id in mapping.items():
             conn.execute(
                 text(
@@ -360,8 +337,7 @@ def open_term(
         )
         _log(
             conn, year, period, None, OPENED,
-            f"Αντιγραφή από {term_label(baseline_year, baseline_period)} ({len(mapping)} γραμμές"
-            + (f", {moved} στο πρόγραμμα 2025)" if moved else ")"),
+            f"Αντιγραφή από {term_label(baseline_year, baseline_period)} ({len(mapping)} γραμμές)",
             opened_by,
         )
     return ""
@@ -424,18 +400,26 @@ def term_changes(year: int, period: str) -> pd.DataFrame:
 # Reading a term
 # --------------------------------------------------------------------------
 
+# A course's name, by code alone: the newest programme that has the code wins.
+# Codes carried over from 2018 kept their code, and only one of 84 changed its
+# name (ΣΥΓ017), which the timetable prints in its 2025 form from now on.
+NEWEST_NAME_SQL = f"""
+SELECT p.name FROM {PERIGRAMMATA_TABLE} p
+WHERE p.locale = 'gr' AND p.code = c.course_code
+ORDER BY p.curriculum DESC LIMIT 1
+"""
+
 _LOAD_TERM_SQL = f"""
-SELECT c.id, c.examino, c.course_code, c.curriculum, c.section, c.name_suffix,
+SELECT c.id, c.examino, c.course_code, c.section, c.name_suffix,
        c.day, c.start_hour, c.duration, c.notes, c.updated_by, c.updated_at,
-       p.name AS course_name,
+       n.name AS course_name,
        COALESCE(i.names, '') AS instructors,
        COALESCE(i.ids, ARRAY[]::INTEGER[]) AS instructor_ids,
        COALESCE(i.conflict_ids, ARRAY[]::INTEGER[]) AS conflict_ids,
        COALESCE(r.codes, ARRAY[]::TEXT[]) AS room_codes,
        COALESCE(r.names, '') AS room
 FROM {CLASSES_TABLE} c
-LEFT JOIN {PERIGRAMMATA_TABLE} p
-       ON p.curriculum = c.curriculum AND p.locale = 'gr' AND p.code = c.course_code
+LEFT JOIN LATERAL ({NEWEST_NAME_SQL}) n ON TRUE
 LEFT JOIN LATERAL (
     SELECT string_agg(s.short_name, ', ' ORDER BY ci.position, s.short_name) AS names,
            array_agg(s.id ORDER BY ci.position, s.short_name) AS ids,
@@ -625,7 +609,6 @@ def add_class(
     *,
     examino: int,
     course_code: str,
-    curriculum: int,
     section: str,
     instructor_ids: list[int],
     room_codes: list[str],
@@ -648,9 +631,9 @@ def add_class(
         class_id = conn.execute(
             text(
                 f"INSERT INTO {CLASSES_TABLE} "
-                "(year, period, examino, course_code, curriculum, section, name_suffix, "
+                "(year, period, examino, course_code, section, name_suffix, "
                 " day, start_hour, duration, notes, updated_by) "
-                "VALUES (:year, :period, :examino, :course_code, :curriculum, :section, "
+                "VALUES (:year, :period, :examino, :course_code, :section, "
                 "        :name_suffix, :day, :start_hour, :duration, :notes, :author) "
                 "RETURNING id"
             ),
@@ -659,7 +642,6 @@ def add_class(
                 "period": period,
                 "examino": examino,
                 "course_code": course_code.strip(),
-                "curriculum": curriculum,
                 "section": section,
                 "name_suffix": name_suffix or None,
                 "day": day,
@@ -796,163 +778,91 @@ def _describe(course_code, section, day, start_hour, duration) -> str:
 # Candidate courses for the arranging tab
 # --------------------------------------------------------------------------
 
-def off_programme(
-    frame: pd.DataFrame, year: int, index: dict[tuple[int, str], int] | None = None
-) -> pd.DataFrame:
-    """Rows the new programme cannot take over, and the coordinator must replace.
+def build_catalogue(programmes: pd.DataFrame) -> pd.DataFrame:
+    """One row per course code, out of every Greek περίγραμμα of every programme.
 
-    Most of the 2025 programme repeats the 2018 one code for code and εξάμηνο
-    for εξάμηνο, so a row copied from last year is usually not a problem at
-    all: only its ``curriculum`` stamp is stale, and ``retag_curricula`` moves
-    it. What is reported here is the remainder — a code the new programme does
-    not have (ΥΔΡ001) or has in a different εξάμηνο (ΔΟΜ007: 3rd in 2018, 4th
-    in 2025) — where somebody has to decide what runs instead.
+    ``programmes`` has ``curriculum, course_code, course_name, examino``.
+    ``course_name`` is the newest programme's (the rule ``NEWEST_NAME_SQL``
+    applies to a term); ``examina`` maps each programme that has the code to
+    its εξάμηνο there — ``{2018: 3, 2025: 4}`` for ΔΟΜ007 — and leaves out a
+    programme where the εξάμηνο is blank. Pure, so testable without a DB.
     """
-    if frame.empty:
-        return frame
-    if index is None:
-        index = programme_examina()
-    mask = [
-        int(curriculum) != curriculum_for(year, int(examino))
-        and _retagged(examino, code, curriculum, year, index) is None
-        for curriculum, examino, code in zip(
-            frame["curriculum"], frame["examino"], frame["course_code"]
-        )
-    ]
-    return frame[mask]
+    columns = ["course_code", "course_name", "examina"]
+    if programmes.empty:
+        return pd.DataFrame(columns=columns)
+    ordered = programmes.sort_values(["course_code", "curriculum"], ascending=[True, False])
+    rows = []
+    for code, group in ordered.groupby("course_code", sort=True):
+        examina = {
+            int(curriculum): int(examino)
+            for curriculum, examino in zip(group["curriculum"], group["examino"])
+            if pd.notna(examino)
+        }
+        rows.append({"course_code": code, "course_name": group["course_name"].iloc[0], "examina": examina})
+    return pd.DataFrame(rows, columns=columns)
 
 
-def retaggable(
-    frame: pd.DataFrame, year: int, index: dict[tuple[int, str], int] | None = None
+def courses_for_semester(
+    catalogue: pd.DataFrame, semester: int, all_semesters: bool = False
 ) -> pd.DataFrame:
-    """Rows whose stamp is stale but whose course the new programme also has."""
-    if frame.empty:
-        return frame
-    if index is None:
-        index = programme_examina()
-    mask = [
-        _retagged(examino, code, curriculum, year, index) is not None
-        for curriculum, examino, code in zip(
-            frame["curriculum"], frame["examino"], frame["course_code"]
-        )
-    ]
-    return frame[mask]
+    """What the arranging tab offers for one εξάμηνο of a term.
 
-
-def _retagged(examino, code, curriculum, year, index) -> int | None:
-    """The curriculum this row should carry in ``year``, or None to leave it.
-
-    A row follows the programme its εξάμηνο runs on that year, but only where
-    that programme has the code **in the same εξάμηνο**: 84 codes are shared
-    between the two programmes, sometimes with different content and a
-    different εξάμηνο, so a bare code match would move ΔΟΜ007 into a year of
-    study it is not taught in.
+    By default, every code **either** programme places in that εξάμηνο: while
+    the two run side by side, a course that moved (ΔΟΜ007, 3rd in 2018 and 4th
+    in 2025) could be taught in either, and guessing which is exactly what the
+    timetable stopped doing. ``all_semesters`` offers every code, from both
+    periods, for a course taught outside its usual εξάμηνο.
     """
-    wanted = curriculum_for(year, int(examino))
-    if wanted == int(curriculum) or index.get((wanted, code)) != int(examino):
-        return None
-    return wanted
+    if all_semesters or catalogue.empty:
+        return catalogue
+    return catalogue[[semester in examina.values() for examina in catalogue["examina"]]]
 
 
-def programme_examina() -> dict[tuple[int, str], int]:
-    """(curriculum, code) -> εξάμηνο, out of the Greek περιγράμματα."""
-    engine = db.get_engine()
-    if engine is None:
-        return {}
-    with engine.connect() as conn:
-        return _programme_examina(conn)
-
-
-def _programme_examina(conn) -> dict[tuple[int, str], int]:
+def programme_semesters(catalogue: pd.DataFrame, period: str) -> set[int]:
+    """The εξάμηνα of ``period`` that any programme has courses in."""
     return {
-        (row[0], row[1]): row[2]
-        for row in conn.execute(
-            text(
-                f"SELECT curriculum, code, examino FROM {PERIGRAMMATA_TABLE} "
-                "WHERE locale = 'gr'"
-            )
-        )
+        examino
+        for examina in catalogue["examina"]
+        for examino in examina.values()
+        if period_for(examino) == period
     }
 
 
-def retag_curricula(year: int, period: str, author: str) -> int:
-    """Re-stamp the term's rows onto the programme their εξάμηνο runs on.
+def examina_label(examina: dict[int, int]) -> str:
+    """«εξ. 3 στο 2018 · εξ. 4 στο 2025», or «εξ. 1» when every programme agrees."""
+    if not examina:
+        return "χωρίς εξάμηνο"
+    if len(set(examina.values())) == 1:
+        return f"εξ. {next(iter(examina.values()))}"
+    return " · ".join(f"εξ. {examino} στο {curriculum}" for curriculum, examino in sorted(examina.items()))
 
-    ``open_term`` does this while copying, but the transition rule itself
-    changes — 2026-27 moved εξάμηνα 3–4 onto the 2025 programme after that
-    year had been opened — and then a term already copied carries stamps that
-    were right when it was made. Nothing but the stamp moves: same course,
-    same εξάμηνο, same hour.
-    """
+
+def course_catalogue(year: int, period: str) -> pd.DataFrame:
+    """``build_catalogue`` from the database, with ``in_term`` for the term's codes."""
     engine = db.get_engine()
     if engine is None:
-        return 0
-    with engine.begin() as conn:
-        index = _programme_examina(conn)
-        rows = conn.execute(
-            text(
-                f"SELECT id, examino, course_code, curriculum FROM {CLASSES_TABLE} "
-                "WHERE year = :year AND period = :period"
-            ),
-            {"year": year, "period": period},
-        ).all()
-        moved = 0
-        for class_id, examino, code, curriculum in rows:
-            wanted = _retagged(examino, code, curriculum, year, index)
-            if wanted is None:
-                continue
-            conn.execute(
-                text(f"UPDATE {CLASSES_TABLE} SET curriculum = :c WHERE id = :id"),
-                {"c": wanted, "id": class_id},
-            )
-            moved += 1
-        if moved:
-            _log(
-                conn, year, period, None, MODIFY,
-                f"Ενημέρωση προγράμματος σπουδών σε {moved} γραμμές",
-                author,
-            )
-    return moved
-
-
-def candidate_courses(year: int, period: str) -> pd.DataFrame:
-    """Courses of the period's εξάμηνα, from the curriculum each one follows.
-
-    Read from the περιγράμματα so the list of what *could* be timetabled is
-    the programme itself, with a flag for the ones the term already has.
-    """
-    engine = db.get_engine()
-    if engine is None:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["course_code", "course_name", "examina", "in_term"])
     with engine.connect() as conn:
-        courses = pd.read_sql(
+        programmes = pd.read_sql(
             text(
-                f"SELECT curriculum, code AS course_code, name AS course_name, examino "
-                f"FROM {PERIGRAMMATA_TABLE} WHERE locale = 'gr' AND examino IS NOT NULL"
+                "SELECT curriculum, code AS course_code, name AS course_name, examino "
+                f"FROM {PERIGRAMMATA_TABLE} WHERE locale = 'gr'"
             ),
             conn,
         )
-        present = pd.read_sql(
-            text(
-                f"SELECT DISTINCT course_code, curriculum FROM {CLASSES_TABLE} "
-                "WHERE year = :year AND period = :period"
-            ),
-            conn,
-            params={"year": year, "period": period},
-        )
-    courses["examino"] = courses["examino"].astype(int)
-    courses = courses[courses["examino"].map(period_for) == period]
-    courses = courses[
-        [
-            curriculum_for(year, int(examino)) == int(curriculum)
-            for curriculum, examino in zip(courses["curriculum"], courses["examino"])
-        ]
-    ]
-    present_keys = set(zip(present["course_code"], present["curriculum"]))
-    courses["in_term"] = [
-        (code, cur) in present_keys for code, cur in zip(courses["course_code"], courses["curriculum"])
-    ]
-    return courses.sort_values(["examino", "course_code"]).reset_index(drop=True)
+        present = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    f"SELECT DISTINCT course_code FROM {CLASSES_TABLE} "
+                    "WHERE year = :year AND period = :period"
+                ),
+                {"year": year, "period": period},
+            )
+        }
+    catalogue = build_catalogue(programmes)
+    catalogue["in_term"] = catalogue["course_code"].isin(present)
+    return catalogue
 
 
 # --------------------------------------------------------------------------
