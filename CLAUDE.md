@@ -13,11 +13,11 @@ uv run streamlit run streamlit/home.py
 ```
 civil_ihu_pyappz/
 ├── streamlit/                        # Streamlit app (entry point + pages)
-│   ├── home.py                       # Landing page + Microsoft login/logout UI
+│   ├── home.py                       # Entry point — st.navigation only (see "Navigation")
 │   ├── auth.py                       # OIDC gate helpers (require_ihu_login, render_login_block)
 │   ├── settings.py                   # get_secret / require_secret — secrets.toml OR env vars
 │   ├── db.py                         # Postgres engine + schema + bootstrap (Railway only)
-│   ├── seed_external.py              # Loads external_<year>.xlsx into external_electors
+│   ├── seed_external.py              # Loads external_<year>.xlsx into mitroa_external_electors
 │   ├── external_table.py             # THE submitted table's layout + registry join
 │   ├── external_report.py            # Consolidated Word report (landscape A4)
 │   ├── proposals_ui.py               # "Προετοιμασία <έτους>" tab — the only writing UI
@@ -28,14 +28,17 @@ civil_ihu_pyappz/
 │   ├── eudoxus_client.py             # Unofficial client for service.eudoxus.gr
 │   ├── eudoxus_db.py                 # Εύδοξος: schema, year copy/lock, catalogue
 │   ├── seed_eudoxus.py               # Loads files/eudoxus/* into the DB (once)
-│   ├── pages/
+│   ├── timetable_db.py               # Πρόγραμμα: schema, terms, staff, rooms, classes, conflicts
+│   ├── seed_timetable.py             # Loads files/timetables/{staff,rooms}.csv + 2025-2026.xlsm (once)
+│   ├── app_pages/                    # NOT "pages/" — see "Navigation" below
+│   │   ├── 0_home.py                 # Landing page + Microsoft login/logout UI
 │   │   ├── 1_📇_perigrammata (legacy).py  # Syllabi v1 (Google Sheets) — superseded by page 6
-│   │   ├── 2_📊_mitroa (legacy).py        # Registries v1 — superseded by page 5
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
 │   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
 │   │   ├── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
 │   │   ├── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
-│   │   └── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
+│   │   ├── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
+│   │   └── 8_🗓_timetable_v2.py      # Timetable v2 (Postgres) — public view, coordinator edits
 │   └── .streamlit/
 │       ├── config.toml               # Theme — IS committed (see "Branding and theme")
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
@@ -46,6 +49,8 @@ civil_ihu_pyappz/
 │   ├── logos/                        # Department + university marks (committed, not hot-linked)
 │   ├── exams/                        # Exam Excel files (.xlsm); active: exams-2026-06.xlsm
 │   ├── timetables/                   # Timetable Excel files (.xlsm); active: 2025-2026.xlsm
+│   │   ├── staff.csv                 # Seed: the people (site 2026-09-15 + former ΔΕΠ + «ΔΕΠ»)
+│   │   └── rooms.csv                 # Seed: the rooms, one code each
 │   ├── perigrammata/                 # Frozen Google Sheets export — seed input, then archive
 │   │   ├── perigrammata_gr_2018.csv  # 102 courses (+1 debris row without a code)
 │   │   ├── perigrammata_gr_2025.csv  # 96 courses
@@ -55,6 +60,7 @@ civil_ihu_pyappz/
 │   │   ├── eudoxus_catalogue_20260909.csv    # what Eudoxus said about those 222 books
 │   │   └── eudoxus.py                        # the original standalone script
 │   └── mitroa/                       # Registries — see "Registry data files" below
+│       ├── db_backups/           # CSV zips downloaded from the app (see "Table names")
 │       ├── professors_tables/        # Annual ΑΠΕΛΛΑ exports (.parquet/.feather/.xlsx)
 │       ├── mitroa_by_year/           # Submitted external-elector workbooks (external_<year>.xlsx)
 │       ├── antikeimena.csv           # The 52 γνωστικά αντικείμενα (Code, field, domain)
@@ -62,7 +68,7 @@ civil_ihu_pyappz/
 │       └── json2024/, json2025/      # Older JSON exports
 ├── jupyter/                          # Exploration notebooks (not part of app)
 ├── plans/                            # Implementation plans (markdown)
-├── tests/                            # Minimal tests (pytest)
+├── tests/                            # pytest; test_db_rename.py runs an embedded Postgres
 └── pyproject.toml                    # Dependencies — managed with uv
 ```
 
@@ -88,14 +94,13 @@ secrets file manually with:
 
 ```toml
 gsheet_perigrammata_id = "..."
-gsheet_mitroa_id = "..."
 gsheet_exams_schedule_id = "..."
 
 # Optional: restrict access to specific @ihu.gr emails. If omitted or empty,
 # ANY @ihu.gr account is allowed. See "Authentication" section below.
 # allowed_emails = ["someone@ihu.gr", "another@ihu.gr"]
 
-# Microsoft Entra ID OIDC — required for pages 1 (perigrammata) and 2 (mitroa).
+# Microsoft Entra ID OIDC — required for the gated pages (1, 5, 6, 7).
 # Restricted to @ihu.gr accounts by streamlit/auth.py.
 [auth]
 redirect_uri = "http://localhost:8501/oauth2callback"
@@ -144,14 +149,14 @@ the script writes.
 ## Authentication
 
 > **Active since 2026-09-06.** Microsoft login works in all three environments.
-> Gated: pages 1, 2, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3 and 4 —
+> Gated: pages 1, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3 and 4 —
 > timetables and exam schedules carry no personal data.
 >
 > `st.login()` raises `StreamlitAuthError` where `[auth]` is missing, so never
 > call it unguarded — `auth.is_configured()` exists for that, and
 > `render_login_block()` shows a warning instead of a traceback.
 
-Pages 1 (perigrammata) and 2 (mitroa) are gated behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
+The gated pages sit behind Microsoft Entra ID OIDC via Streamlit's native `st.login()`. The gate lives in [streamlit/auth.py](streamlit/auth.py):
 
 - `render_login_block()` — called from `home.py`. Shows the login button when logged out; user info + logout when logged in.
 - `require_ihu_login()` — called at the top of each protected page (after `st.set_page_config(...)`). Checks state and `st.stop()`s if unauthorized.
@@ -196,8 +201,10 @@ Railway (workspace "Georgios Panagopoulos's Projects", Hobby plan):
 - Service `civil-ihu-pyappz` — `90a05a29-32ff-4d6a-9e8a-3ff28073fcdd`
 - Builder Railpack; start command
   `streamlit run streamlit/home.py --server.port $PORT --server.address 0.0.0.0`
-- Variables set: `gsheet_perigrammata_id`, `gsheet_mitroa_id`,
-  `gsheet_exams_schedule_id` (flat env vars — resolved via `settings.py`),
+- Variables set: `gsheet_perigrammata_id`, `gsheet_exams_schedule_id` (flat
+  env vars — resolved via `settings.py`; `gsheet_mitroa_id` is still set but no
+  longer read — page 2 was deleted on 2026-09-15 and nothing else opens that
+  sheet, so it can be removed at any time),
   `DATABASE_URL` (reference to the Postgres service), and for OIDC
   `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, `AUTH_COOKIE_SECRET`,
   `AUTH_SERVER_METADATA_URL` (+ optional `AUTH_REDIRECT_URI`, otherwise derived
@@ -217,9 +224,10 @@ in the same project, with a volume. **Deliberately has no public TCP proxy**:
 it is reachable only from inside Railway, over the private network. The app
 service reads it through `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
 
-It holds three unrelated groups of tables: the μητρώα ones described below, the
-`perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)" — and the
-`eudoxus_*` ones — see "Εύδοξος (page 7, Postgres)". All are installed and
+It holds four unrelated groups of tables: the `mitroa_*` ones described below, the
+`perigrammata_*` ones — see "Περιγράμματα (page 6, Postgres)" — the
+`eudoxus_*` ones — see "Εύδοξος (page 7, Postgres)" — and the `timetable_*`
+ones — see "Εβδομαδιαίο πρόγραμμα (page 8, Postgres)". All are installed and
 seeded from [streamlit/db.py](streamlit/db.py), which is the only place a
 connection is made.
 
@@ -254,18 +262,34 @@ Consequences to keep in mind:
   `MIGRATIONS_SQL`, written to be safe on every start (`DROP CONSTRAINT IF
   EXISTS` then `ADD CONSTRAINT`).
 
-### Pending: rename the three tables (agreed 2026-09-06, deferred)
+### Table names (renamed 2026-09-15)
 
-`external_electors` → `mitroo_electors`, `year_status` → `mitroo_years`,
-`proposals` → `mitroo_proposals`, so a future admin session's `\dt` shows the
-app's tables as a group. **Not yet applied** — members are working on the 2026
-tables and this is not a change to make under them; do it once 2026 is
-finalised. The renames must run **before** `SCHEMA_SQL`, not in
-`MIGRATIONS_SQL`, or the app silently starts against three empty tables. Read
-[plans/rename-mitroa-tables.md](plans/rename-mitroa-tables.md) before touching
-this.
+The three μητρώα tables were created as `external_electors`, `year_status`
+and `proposals` and renamed to `mitroa_external_electors`,
+`mitroa_year_status` and `mitroa_proposals` once the 2026 year was locked, so
+that a future admin session's `\dt` shows the app's tables as three groups
+(`mitroa_*`, `perigrammata_*`, `eudoxus_*`). `db._rename_legacy_tables` does it
+on start, **before** `SCHEMA_SQL` and in the same transaction — run after it,
+`CREATE TABLE IF NOT EXISTS` would create three empty tables under the new
+names and the app would silently start against them. It also renames the
+constraints, indexes and the `proposals_id_seq` sequence, which `ALTER TABLE …
+RENAME` leaves alone, and prints `[db.get_engine] Μετονομάστηκαν πίνακες: …`
+to the deployment log. Before renaming, each table is copied verbatim to
+`mitroa_backup_20260915_<old name>`: nothing outside Railway can take a backup,
+so the snapshot lives in the database until it has been downloaded.
 
-### `external_electors`
+**Backups leave the database through the app.** The coordinator section of
+the «Προετοιμασία <έτους>» tab has «Αντίγραφο ασφαλείας της βάσης (CSV)»
+(`db.backup_archive`): every `mitroa_*` table as a CSV in one zip. Commit the
+download under `files/mitroa/db_backups/`. **Committing it is what removes
+the copies**: on start, `db._drop_committed_backup_copies` drops every
+`mitroa_backup_<date>_*` table for which a `mitroa_db_<date or later>-*.zip`
+exists in that folder, and logs it. The archive includes the copies, so a zip
+from that day or later holds them; a copy nobody has downloaded yet stays.
+The 2026-09-15 snapshot is committed, so the first start after this code
+landed drops its copies.
+
+### `mitroa_external_electors`
 
 One row per (year, γνωστικό αντικείμενο, elector) — see [streamlit/db.py](streamlit/db.py):
 
@@ -313,13 +337,13 @@ export are kept with blank columns and counted in a warning, never dropped.
 A year under preparation is **never stored as rows** while it is open. Its table
 is computed on read as *baseline year + accepted proposals*
 (`db.working_electors`); only `db.finalize_year` writes it into
-`external_electors`. So `external_electors` always means "officially approved",
+`mitroa_external_electors`. So `mitroa_external_electors` always means "officially approved",
 and the page-5 tab and the Word report need no notion of drafts.
 
-- `year_status(year, status, baseline_year, …)` — `ΑΝΟΙΧΤΟ` → `ΚΛΕΙΔΩΜΕΝΟ`.
+- `mitroa_year_status(year, status, baseline_year, …)` — `ΑΝΟΙΧΤΟ` → `ΚΛΕΙΔΩΜΕΝΟ`.
   `db.open_year(2026, baseline_year=2025, …)` copies nothing; it just records
   the baseline.
-- `proposals` — one row per proposed change: `ΠΡΟΣΘΗΚΗ` / `ΑΦΑΙΡΕΣΗ` /
+- `mitroa_proposals` — one row per proposed change: `ΠΡΟΣΘΗΚΗ` / `ΑΦΑΙΡΕΣΗ` /
   `ΜΕΤΑΒΟΛΗ` (carries the new characterisation *and* the new justification, so
   changing both stays one decision a coordinator cannot half-accept; the older
   split `ΧΑΡΑΚΤΗΡΙΣΜΟΣ` / `ΑΙΤΙΟΛΟΓΗΣΗ` still replay), with a mandatory `note`,
@@ -401,7 +425,7 @@ look at, and the report prints them with `AUTO_REMOVAL_NOTE` ("Διαγραφή 
 themselves, with their own justification.
 
 The report's change table has **three sources**, because each leaves a different
-trace: proposals (a row in `proposals`), automatic removals (no row at all), and
+trace: proposals (a row in `mitroa_proposals`), automatic removals (no row at all), and
 **registry updates** — βαθμίδα, φορέας, γνωστικό αντικείμενο moving between the
 baseline year's export and the current one (`registry_changes`, action
 `ΕΝΗΜΕΡΩΣΗ`). The last are not changes to the list, but they *are* changes to
@@ -420,7 +444,8 @@ submitted document omits them. For 2026: 58
 removals and 132 registry updates, so every one of the 52 subjects has a table.
 
 Roles are two, and there is deliberately **no users table**: a coordinator is an
-email listed in the `coordinator_emails` setting (same mechanism as
+email listed in the `coordinator_emails` setting (the same list also governs
+who edits the timetable on page 8) (same mechanism as
 `allowed_emails`), everyone else who passes the login gate is a member. Members
 may propose on any subject; only a coordinator decides proposals and locks a
 year. A table would need an admin screen to manage and still need some way to
@@ -671,6 +696,137 @@ empty** — after that the availability check owns it, and re-applying the dump
 on every restart would replace a fresh answer with a stale one. Seeded years are
 inserted as `ΚΛΕΙΔΩΜΕΝΟ`.
 
+## Εβδομαδιαίο πρόγραμμα (page 8, Postgres)
+
+Page 4 reads `files/timetables/2025-2026.xlsm` and **stays as it is** until
+told otherwise. Page 8 shows the same five views from the database and adds
+the preparation of the next semester. Viewing is public like page 4; editing
+is for `coordinator_emails` only (decided 2026-09-15), so the page checks the
+role where it matters instead of gating itself with `require_ihu_login`.
+
+Tables in [streamlit/timetable_db.py](streamlit/timetable_db.py):
+`timetable_staff` · `timetable_staff_terms` · `timetable_rooms` ·
+`timetable_terms` · `timetable_classes` · `timetable_class_instructors` ·
+`timetable_class_rooms` · `timetable_changes`.
+
+### A term is a copy of last year's same period
+
+A *term* is `(year, period)`: `(2026, 'Χειμερινό')` is the winter of 2026-27.
+`open_term` **copies** the same period one year earlier — classes, links, and
+who was active — and the coordinator rearranges; `lock_term` freezes it. One
+term is open at a time. Same model as Εύδοξος, for the same reason: one owner,
+so no proposals machinery.
+
+### Staff, not instructor
+
+The site lists ΕΤΕΠ who never teach, and "instructor" is the role a person has
+on one class. `timetable_staff` holds everyone (category ΔΕΠ / ΕΔΙΠ / ΕΤΕΠ /
+ΕΚΤΑΚΤΟΣ / ΑΛΛΟ, rank, site URL) and prints `short_name` — «Σαφούρη Χρ.» vs
+«Σαφούρη Γ.». Λιαλιαμπής and Παπαϊωάννου are former ΔΕΠ who still teach and
+are filed as ΔΕΠ. «ΔΕΠ» is a `placeholder` row for the courses all faculty
+teach (ΓΕΝ009, ΓΕΝ010); the conflict check ignores placeholders.
+
+**Activity is per term** (`timetable_staff_terms`), not a column on the
+person: a column per semester would need a migration every term, and a from/to
+range does not fit έκτακτοι who come and go. No row means *unknown*, and the
+seed marks as active only whoever taught in that term. The Προσωπικό tab edits
+the flag for the selected term with a `data_editor`.
+
+### Classes
+
+One row per meeting, as a workbook row was: εξάμηνο, course, `section`
+(Θ · Ε · Ε1…Ε9 · Φ), day 1–5, whole `start_hour` (08–20, **no half hours**),
+`duration`. `day IS NULL` is a course listed for the term and not yet placed —
+the 16 workbook rows with only a semester survive that way, and the
+Προετοιμασία tab lists them. Instructors and rooms are link tables: both are
+already many-to-one in the data (ΓΕΝ002 has two instructors, ΔΟΜ011 two rooms).
+
+**A class is a course code, not a (programme, code) pair** (since
+2026-09-16). New courses of the 2025 programme got new codes and carried-over
+courses kept theirs, so the code identifies the course. Which programme an
+εξάμηνο follows in a given year is deliberately **not modelled**: in the
+transition courses may move between winter and spring, sooner or later, and
+nobody can say in advance. The former rule (`NEW_CURRICULUM_EXAMINA`,
+re-stamping on `open_term`, `off_programme`) is gone, and so is
+`timetable_classes.curriculum` — dropped by an `ALTER TABLE … DROP COLUMN IF
+EXISTS` at the end of the timetable `SCHEMA_SQL`, **not** in
+`db.MIGRATIONS_SQL`, which runs before the timetable schema and would fail on a
+fresh database. `perigrammata_courses.curriculum` stays: the περιγράμματα need it.
+
+- **Names come from the περιγράμματα, by code, the newest programme winning**
+  (`NEWEST_NAME_SQL`, a lateral join in `load_term`) — so the seed must run
+  after the περιγράμματα one. Of the 84 shared codes only ΣΥΓ017 changed its
+  name; the timetable prints the 2025 name everywhere, locked 2025-26 terms
+  included, while the περιγράμματα keep both. (Page 3 reads names from the
+  exams workbook, so there the new name is typed into the next file.)
+- **The row's εξάμηνο is the timetable's**, not the programme's: a course added
+  while editing the 3rd εξάμηνο sits in the 3rd whatever either programme says.
+  20 shared codes changed εξάμηνο, 19 of them to the other period.
+- **What the Προετοιμασία tab offers** is `course_catalogue` (one row per code:
+  newest name, `examina` = `{2018: 3, 2025: 4}`, `in_term`), filtered by the pure
+  `courses_for_semester`: by default every code **either** programme places in
+  the selected εξάμηνο (ΔΟΜ007 appears under both 3 and 4); the toggle
+  «Δυνατότητα επιλογής από όλα τα εξάμηνα» offers every code of both periods.
+  Each option carries `examina_label` («εξ. 3 στο 2018 · εξ. 4 στο 2025»).
+- **The toggle and the course selectbox sit above the «Νέα γραμμή» form, inside
+  an `@st.fragment`.** Above the form because they change what the form offers
+  and a widget in a form does not rerun until submit (the page-5 elector trap);
+  a fragment because page 8 caches nothing, so a full rerun would repeat
+  `load_term`, staff, rooms and the conflict check on every flip. A successful
+  add calls `st.rerun()`, whose default scope is the whole app, so the table
+  and the week above refresh.
+- The seed stores codes only and lists any code no περίγραμμα has in its log
+  line; `load_term` prints «(άγνωστο μάθημα)» for it.
+
+`name_suffix` keeps the «ΔΥ, ΥΕ» marker the workbook wrote after elective
+titles, and `display_name` prints it after the περίγραμμα name. It also drives
+the conflict rule below.
+
+**`shape_term` empties the nullable TEXT columns** (`OPTIONAL_TEXT_COLUMNS`:
+`name_suffix`, `notes`). A NULL arrives from `read_sql` as `NaN`, and
+`NaN or ""` keeps the `NaN` because **NaN is truthy** — which is how the
+literal «nan» appeared inside the «Ένδειξη μετά τον τίτλο» text input on
+2026-09-15. Emptying them once, where the frame is built, means no caller has
+to remember; `add_class` / `update_class` turn `""` back into NULL.
+
+`load_term` returns the workbook's column names (`course_id`, `class_name`,
+`full_class_name`, `semester`, `instructors`, `day`, `start_time`, `duration`,
+`room`…) so `utils/timetable_export.py` works unchanged on either source.
+
+### Conflicts are warnings, not constraints
+
+`conflicts(frame)` is pure and runs on what `load_term` returns. Two placed
+classes on the same day with overlapping hours conflict when they share a
+room, share a non-placeholder instructor, or belong to the same εξάμηνο —
+**except** parallel lab groups of one course (Ε1 / Ε2 run together on
+purpose) and electives whose stream markers share no letter (ΓΥ beside
+«ΥΥ, ΔΕ» is fine; ΓΥ beside ΓΕ is not; a course without a marker is common to
+all and conflicts with anything). Θ and Ε of the same course overlapping *is* a
+conflict. The tab shows them as a table; saving is never blocked, because a
+term being rearranged is allowed to be inconsistent. With the stream rule the
+seeded 2025-26 still reports a handful, all genuinely in the workbook (ΔΟΜ001
+Θ and ΔΟΜ002 Ε1 both in 301 on Tuesday 10:00; ΓΕΩ009 «ΓΥ» over ΥΔΡ006
+«ΥΥ, ΓΕ»).
+
+### Seed data
+
+[streamlit/seed_timetable.py](streamlit/seed_timetable.py) loads
+`files/timetables/staff.csv` and `rooms.csv` while those tables are empty, and
+`2025-2026.xlsm` as two locked terms — once. `WORKBOOKS` is an explicit dict,
+not a glob: **`2026-2027.xlsm` is a byte-identical copy of the 2025-26 file**
+and must not be seeded as 2026-27 (it is kept until the database approach is
+confirmed, then deleted). `ROOM_ALIASES` maps every room spelling the workbook
+used to a code («Αίθ. Τεχν. Σχεδίου 1» and «Εργαστήριο Τεχνικού Σχεδίου Ι»
+are the same room, ΤΣ1); an unmapped spelling **raises**, as does an unknown
+instructor. The bare «Σαφούρη» on ΔΟΜ007 is Γεωργία (the drawing lab).
+
+Rooms and staff are edited in the page from then on; the CSVs are the
+historical record, like the μητρώα workbooks.
+
+[tests/test_timetable.py](tests/test_timetable.py) covers the parser without
+a database, and the seed, copy-open, edits, lock and the page script itself
+(via `streamlit.testing.v1.AppTest`) against the embedded Postgres.
+
 ## Branding and theme
 
 Two colours, both sampled from the logo files rather than picked by eye:
@@ -725,10 +881,37 @@ Current Streamlit guidance, worth following in new code:
   imports legitimately follow code; selecting the rule keeps the `# noqa: E402`
   comments that document this meaningful. Since ruff 0.16 they are otherwise
   reported as unused directives on every page — 33 of them.
-- Pages still use the legacy `pages/` folder. Streamlit now recommends
-  `st.navigation` / `st.Page`, which would give proper Greek titles and icons in
-  the sidebar instead of `5_📊_mitroa_v2`-style filenames. Not done: it touches
-  every page.
+### Navigation (st.navigation, since 2026-09-15)
+
+[streamlit/home.py](streamlit/home.py) is **only** a router: it declares every
+page with `st.Page` and calls `st.navigation(...).run()`. The sidebar therefore
+carries real Greek titles instead of `5_📊_mitroa_v2`-style filenames.
+
+- **The folder is `app_pages/`, and renaming it back would silently disable all
+  of this.** Streamlit still runs its legacy multipage machinery whenever a
+  `pages/` directory sits beside the entry script (`_mpa_v1` in
+  `runtime/scriptrunner/script_runner.py`, keyed on
+  `PagesManager.uses_pages_directory`): it builds navigation from the folder
+  itself and never reaches the `st.navigation` call.
+- **The page filenames keep their number and emoji, and must.** `st.Page`
+  derives a page's URL from the filename with the same function the old folder
+  used (`source_util.page_icon_and_name`, which strips the leading number and
+  the emoji), so `/mitroa_v2`, `/exams-schedule` and the rest still resolve and
+  old links keep working. The numbers no longer order anything — the list in
+  `home.py` does — but renaming a file changes its URL.
+- Titles are passed explicitly and repeat what each page sets in its own
+  `st.set_page_config(page_title=…)`, so the sidebar label and the browser tab
+  agree. Icons are passed explicitly too and are the same emoji the filenames
+  carry.
+- **The router runs on every rerun, before the selected page.** Anything put
+  there is paid for by every page, which is why the landing page is an ordinary
+  page (`app_pages/0_home.py`) rather than the body of `home.py`, and why
+  `db.bootstrap()` stayed with it. The pages that need the database still call
+  `bootstrap()` themselves.
+- `st.set_page_config` accepts **repeated, additive calls**: the router sets the
+  app-wide title, favicon and sidebar state, and a page's own call overrides
+  what it names. The router deliberately sets no `layout`, so the pages that
+  want a wide one keep deciding for themselves.
 
 ## Active data files
 
@@ -812,15 +995,16 @@ These are planned refactors (no functionality changes):
 3. **Replace magic strings with constants** — column names, time slots, file paths.
 4. **Add smoke tests** for document generation.
 5. **Move active file paths to a config section** so year updates are a single-line change.
-6. **Local Postgres for development (agreed 2026-09-09, deferred).** Every
-   DB-backed feature — the μητρώα tables *and* the new περιγράμματα ones — can
-   only be exercised on Railway, which makes the edit form on page 6 and any
-   schema change a push-and-read-the-log affair. `settings.get_secret` already
-   falls back to environment variables, so a throwaway Postgres (Docker, or any
-   local install) plus `DATABASE_URL` is enough: `get_engine` installs both
-   schemas and `bootstrap` seeds from the committed files, giving a full local
-   copy with no access to production data. Nothing in the code needs to change
-   — this is a dev-setup task, and worth doing before the next schema change.
+6. **Local Postgres for development (agreed 2026-09-09, half done).** The
+   tests have one: `pgserver` (dev extra) bundles Postgres binaries and
+   [tests/test_db_rename.py](tests/test_db_rename.py) starts a throwaway
+   instance in a temp directory, so schema changes are no longer a
+   push-and-read-the-log affair — copy its `database` fixture for the next
+   one. Running the *app* against a local Postgres is still not set up:
+   `settings.get_secret` falls back to environment variables, so any local
+   Postgres plus `DATABASE_URL` is enough — `get_engine` installs all three
+   schemas and `bootstrap` seeds from the committed files, a full local copy
+   with no access to production data.
 
 ## Notes
 

@@ -1,3 +1,23 @@
+"""Entry point. Declares the app's pages and runs the selected one.
+
+Every page is named here with ``st.Page``, so the sidebar carries real Greek
+titles instead of the ``5_📊_mitroa_v2``-style filenames the legacy ``pages/``
+folder produced. The page files keep those names: ``st.Page`` derives a page's
+URL from its filename exactly as the old folder did — it drops the leading
+number and the emoji — so ``/mitroa_v2``, ``/exams-schedule`` and the rest
+still resolve and existing links keep working.
+
+**The folder had to be renamed ``pages`` → ``app_pages``.** Streamlit still
+runs the legacy multipage machinery whenever a ``pages/`` directory sits beside
+the entry script: it builds its own navigation out of the folder and runs the
+chosen page itself, so ``st.navigation`` below would never be reached.
+
+This script runs on every rerun, before the page. Keep it to navigation — work
+placed here is work every page pays for. That is why the landing page is a page
+like any other (``app_pages/0_home.py``) rather than the body of this file, and
+why the database bootstrap stayed there with it.
+"""
+
 import warnings
 
 import streamlit as st
@@ -17,89 +37,55 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from auth import render_login_block  # noqa: E402
-from branding import (  # noqa: E402
-    DEPARTMENT_NAME,
-    UNIVERSITY_LOGO,
-    UNIVERSITY_NAME,
-    UNIVERSITY_URL,
-    apply_branding,
-)
-
-apply_branding()
-
-# One row, department mark on the left (via st.logo, top-left) and the
-# university mark on the right.
-with st.container(horizontal=True, horizontal_alignment="right"):
-    if UNIVERSITY_LOGO.exists():
-        st.image(str(UNIVERSITY_LOGO), width=200, link=UNIVERSITY_URL)
-
-st.title(DEPARTMENT_NAME)
-st.caption(UNIVERSITY_NAME)
-
-st.markdown(
-    "Εσωτερική εφαρμογή του Τμήματος για τα περιγράμματα μαθημάτων, τα μητρώα "
-    "εκλεκτόρων, τα συγγράμματα του Ευδόξου, καθώς και τα προγράμματα "
-    "εξετάσεων και διδασκαλίας."
-)
-
-render_login_block()
-
-st.subheader("Ενότητες", divider="gray")
-
-# Sentence-case descriptions, one line each — the sidebar does the navigating.
-SECTIONS = [
-    (
-        ":material/description:",
-        "Περιγράμματα μαθημάτων",
-        (
-            "Τα περιγράμματα των προγραμμάτων σπουδών 2018 και 2025, "
-            "με επεξεργασία και εξαγωγή σε Word."
-        ),
+# No `layout` here on purpose: the pages that want a wide one set it themselves,
+# and naming it here would fight them.
+#
+# Titles are the ones each page already declares in its own `set_page_config`,
+# so the sidebar label and the browser tab agree. The icons are the emoji the
+# filenames carry — the legacy folder read them out of the names; `st.Page` is
+# told them instead. The order is the one the leading numbers used to impose.
+PAGES = [
+    st.Page(
+        "app_pages/0_home.py",
+        title="Αρχική",
+        icon=":material/foundation:",
+        default=True,
     ),
-    (
-        ":material/groups:",
-        "Μητρώα εκλεκτόρων",
-        (
-            "Εσωτερικοί και εξωτερικοί εκλέκτορες ανά γνωστικό αντικείμενο, "
-            "με προτάσεις μεταβολών και συγκεντρωτική αναφορά."
-        ),
+    st.Page(
+        "app_pages/3_⛱_exams-schedule.py",
+        title="Πρόγραμμα Εξετάσεων",
+        icon="⛱",
     ),
-    (
-        ":material/menu_book:",
-        "Εύδοξος",
-        (
-            "Τα συγγράμματα ανά ακαδημαϊκό έτος και έλεγχος διαθεσιμότητάς "
-            "τους για το επόμενο έτος."
-        ),
+    st.Page(
+        "app_pages/4_📅_weekly_timetable.py",
+        title="Εβδομαδιαίο Πρόγραμμα",
+        icon="📅",
     ),
-    (
-        ":material/event:",
-        "Πρόγραμμα εξετάσεων",
-        "Το πρόγραμμα της τρέχουσας εξεταστικής περιόδου.",
+    st.Page(
+        "app_pages/5_📊_mitroa_v2.py",
+        title="Μητρώα γνωστικών αντικειμένων",
+        icon="📊",
     ),
-    (
-        ":material/calendar_month:",
-        "Ωρολόγιο πρόγραμμα",
-        "Το εβδομαδιαίο πρόγραμμα διδασκαλίας του τρέχοντος ακαδημαϊκού έτους.",
+    st.Page(
+        "app_pages/6_📇_perigrammata_v2.py",
+        title="Περιγράμματα μάθημάτων",
+        icon="📇",
+    ),
+    st.Page(
+        "app_pages/1_📇_perigrammata (legacy).py",
+        title="Περιγράμματα (παλαιό)",
+        icon="📇",
+    ),
+    st.Page(
+        "app_pages/7_📚_eudoxus.py",
+        title="Εύδοξος - Συγγράμματα",
+        icon="📚",
+    ),
+    st.Page(
+        "app_pages/8_🗓_timetable_v2.py",
+        title="Εβδομαδιαίο πρόγραμμα v2",
+        icon="🗓",
     ),
 ]
 
-for icon, title, description in SECTIONS:
-    with st.container(border=True):
-        st.markdown(f"##### {icon} {title}")
-        st.caption(description)
-
-st.caption(
-    "Η πλοήγηση γίνεται από το πλαϊνό μενού. Ορισμένες ενότητες απαιτούν "
-    "σύνδεση με λογαριασμό @ihu.gr."
-)
-
-# Last, deliberately: the schema and the historical data are installed on first
-# start and the database is reachable only from inside Railway. Streamlit
-# streams the page top to bottom, so everything above is already on screen
-# while this runs.
-import db  # noqa: E402
-
-if db.is_available():
-    st.sidebar.caption(db.bootstrap())
+st.navigation(PAGES).run()

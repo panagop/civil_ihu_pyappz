@@ -9,7 +9,9 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 
-def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
+def create_weekly_timetable_document(
+    df: pd.DataFrame, period: str, year_label: str = "2025-2026"
+) -> bytes:
     """Δημιουργεί Word έγγραφο με εβδομαδιαίο πρόγραμμα μαθημάτων."""
     doc = Document()
 
@@ -19,7 +21,7 @@ def create_weekly_timetable_document(df: pd.DataFrame, period: str) -> bytes:
     section.page_height = Inches(8.5)
 
     title = doc.add_heading(
-        f'Εβδομαδιαίο Πρόγραμμα Μαθημάτων - {period} Εξάμηνο 2025-2026', 0)
+        f'Εβδομαδιαίο Πρόγραμμα Μαθημάτων - {period} Εξάμηνο {year_label}', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     semesters = sorted(df['semester'].unique())

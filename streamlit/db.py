@@ -17,11 +17,16 @@ historical 2025 data are installed by the app itself on first start — see
 
 from __future__ import annotations
 
+import io
+import re
+import zipfile
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Connection, Engine, create_engine, text
 
 from settings import get_secret, get_secret_list
 
@@ -38,7 +43,7 @@ SNAPSHOTS_CSV = ROOT / "files" / "mitroa" / "registry_snapshots.csv"
 # elector — name, φορέας, βαθμίδα, ΦΕΚ — is joined in from that year's ΑΠΕΛΛΑ
 # export (a parquet file in the repo), so it is never duplicated here.
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS external_electors (
+CREATE TABLE IF NOT EXISTS mitroa_external_electors (
     year             INTEGER NOT NULL,
     field_code       INTEGER NOT NULL,
     elector_id       INTEGER NOT NULL,
@@ -50,13 +55,13 @@ CREATE TABLE IF NOT EXISTS external_electors (
 
 -- "in which αντικείμενα does this person appear?" — the primary key only
 -- covers the (year, field_code) prefix.
-CREATE INDEX IF NOT EXISTS external_electors_year_elector_idx
-    ON external_electors (year, elector_id);
+CREATE INDEX IF NOT EXISTS mitroa_external_electors_year_elector_idx
+    ON mitroa_external_electors (year, elector_id);
 
 -- A year under preparation. Its table is never stored while open: it is the
 -- baseline year plus the accepted proposals, computed on read. Only
--- finalisation writes rows into external_electors.
-CREATE TABLE IF NOT EXISTS year_status (
+-- finalisation writes rows into mitroa_external_electors.
+CREATE TABLE IF NOT EXISTS mitroa_year_status (
     year          INTEGER PRIMARY KEY,
     status        TEXT    NOT NULL CHECK (status IN ('ΑΝΟΙΧΤΟ', 'ΚΛΕΙΔΩΜΕΝΟ')),
     baseline_year INTEGER,
@@ -69,7 +74,7 @@ CREATE TABLE IF NOT EXISTS year_status (
 -- Proposed changes to the open year. Two members proposing on the same elector
 -- produce two rows rather than overwriting each other; the coordinator resolves
 -- the conflict when deciding.
-CREATE TABLE IF NOT EXISTS proposals (
+CREATE TABLE IF NOT EXISTS mitroa_proposals (
     id               BIGSERIAL PRIMARY KEY,
     year             INTEGER NOT NULL,
     field_code       INTEGER NOT NULL,
@@ -88,15 +93,17 @@ CREATE TABLE IF NOT EXISTS proposals (
     decision_note    TEXT,
     -- An addition or a re-characterisation is meaningless without the value it
     -- proposes; the database refuses one rather than trusting the UI.
-    CONSTRAINT proposals_needs_characterization CHECK (
+    CONSTRAINT mitroa_proposals_needs_characterization CHECK (
         action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ') OR characterization IS NOT NULL),
-    CONSTRAINT proposals_needs_reasoning CHECK (
+    CONSTRAINT mitroa_proposals_needs_reasoning CHECK (
         action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΑΙΤΙΟΛΟΓΗΣΗ') OR reasoning IS NOT NULL),
-    CONSTRAINT proposals_note_not_blank CHECK (btrim(note) <> '')
+    CONSTRAINT mitroa_proposals_note_not_blank CHECK (btrim(note) <> '')
 );
 
-CREATE INDEX IF NOT EXISTS proposals_year_field_idx ON proposals (year, field_code);
-CREATE INDEX IF NOT EXISTS proposals_year_status_idx ON proposals (year, status);
+CREATE INDEX IF NOT EXISTS mitroa_proposals_year_field_idx
+    ON mitroa_proposals (year, field_code);
+CREATE INDEX IF NOT EXISTS mitroa_proposals_year_status_idx
+    ON mitroa_proposals (year, status);
 """
 
 PENDING = "ΕΚΚΡΕΜΕΙ"
@@ -129,21 +136,44 @@ MODIFY = "ΜΕΤΑΒΟΛΗ"
 RECHARACTERIZE = "ΧΑΡΑΚΤΗΡΙΣΜΟΣ"
 REJUSTIFY = "ΑΙΤΙΟΛΟΓΗΣΗ"
 
+# The three tables were created without a prefix and renamed on 2026-09-15 so
+# that a \dt shows the app's tables as groups (mitroa_*, perigrammata_*,
+# eudoxus_*). An installation that still carries the old names is upgraded by
+# _rename_legacy_tables(), which runs *before* SCHEMA_SQL: after it, the
+# CREATE TABLE IF NOT EXISTS statements find the renamed tables and do nothing.
+# Run the other way round, the schema would create three empty tables under the
+# new names, the rename would fail on "relation already exists", and the app
+# would start against empty tables while the real rows sat under the old names.
+LEGACY_TABLES = {
+    "external_electors": "mitroa_external_electors",
+    "year_status": "mitroa_year_status",
+    "proposals": "mitroa_proposals",
+}
+TABLE_PREFIX = "mitroa_"
+# Before renaming, each table is copied verbatim (data only) under this prefix
+# — a snapshot of the exact state before the change, kept inside the database
+# because nothing outside Railway can take one. Download it as CSV from the
+# coordinator section of the Προετοιμασία tab (backup_archive()) and commit it;
+# the copies are dropped by _drop_committed_backup_copies() once that is done.
+BACKUP_PREFIX = "mitroa_backup_20260915_"
+BACKUPS_DIR = ROOT / "files" / "mitroa" / "db_backups"
+
 # Applied after SCHEMA_SQL. CREATE TABLE IF NOT EXISTS will not touch a table
 # that already exists, so anything added to an existing installation has to go
 # here — idempotently, because it runs on every start.
 MIGRATIONS_SQL = """
-ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_action_check;
-ALTER TABLE proposals ADD CONSTRAINT proposals_action_check CHECK (action IN
-    ('ΠΡΟΣΘΗΚΗ', 'ΑΦΑΙΡΕΣΗ', 'ΜΕΤΑΒΟΛΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ', 'ΑΙΤΙΟΛΟΓΗΣΗ'));
+ALTER TABLE mitroa_proposals DROP CONSTRAINT IF EXISTS mitroa_proposals_action_check;
+ALTER TABLE mitroa_proposals ADD CONSTRAINT mitroa_proposals_action_check
+    CHECK (action IN ('ΠΡΟΣΘΗΚΗ', 'ΑΦΑΙΡΕΣΗ', 'ΜΕΤΑΒΟΛΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ', 'ΑΙΤΙΟΛΟΓΗΣΗ'));
 
-ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_needs_characterization;
-ALTER TABLE proposals ADD CONSTRAINT proposals_needs_characterization CHECK (
-    action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΜΕΤΑΒΟΛΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ')
+ALTER TABLE mitroa_proposals
+    DROP CONSTRAINT IF EXISTS mitroa_proposals_needs_characterization;
+ALTER TABLE mitroa_proposals ADD CONSTRAINT mitroa_proposals_needs_characterization
+    CHECK (action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΜΕΤΑΒΟΛΗ', 'ΧΑΡΑΚΤΗΡΙΣΜΟΣ')
     OR characterization IS NOT NULL);
 
-ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_needs_reasoning;
-ALTER TABLE proposals ADD CONSTRAINT proposals_needs_reasoning CHECK (
+ALTER TABLE mitroa_proposals DROP CONSTRAINT IF EXISTS mitroa_proposals_needs_reasoning;
+ALTER TABLE mitroa_proposals ADD CONSTRAINT mitroa_proposals_needs_reasoning CHECK (
     action NOT IN ('ΠΡΟΣΘΗΚΗ', 'ΜΕΤΑΒΟΛΗ', 'ΑΙΤΙΟΛΟΓΗΣΗ')
     OR reasoning IS NOT NULL);
 """
@@ -177,15 +207,169 @@ def get_engine() -> Engine | None:
         # module for the engine, so a top-level import would be circular.
         from eudoxus_db import SCHEMA_SQL as EUDOXUS_SCHEMA_SQL
         from perigrammata_db import SCHEMA_SQL as PERIGRAMMATA_SCHEMA_SQL
+        from timetable_db import SCHEMA_SQL as TIMETABLE_SCHEMA_SQL
 
         with engine.begin() as conn:
+            dropped = _drop_committed_backup_copies(conn)
+            renamed = _rename_legacy_tables(conn)
             conn.execute(text(SCHEMA_SQL))
             conn.execute(text(MIGRATIONS_SQL))
             conn.execute(text(PERIGRAMMATA_SCHEMA_SQL))
             conn.execute(text(EUDOXUS_SCHEMA_SQL))
+            conn.execute(text(TIMETABLE_SCHEMA_SQL))
+        if dropped:
+            print(
+                "[db.get_engine] Διαγράφηκαν αντίγραφα ασφαλείας που υπάρχουν "
+                "πλέον στο αποθετήριο: " + ", ".join(dropped),
+                flush=True,
+            )
+        if renamed:
+            print(
+                "[db.get_engine] Μετονομάστηκαν πίνακες: " + ", ".join(renamed),
+                flush=True,
+            )
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         print(f"[db.get_engine] Αποτυχία εφαρμογής σχήματος: {exc}", flush=True)
     return engine
+
+
+def _rename_legacy_tables(conn: Connection) -> list[str]:
+    """Bring a pre-2026-09-15 installation to the ``mitroa_`` names.
+
+    For each table that still exists under its old name (and whose new name is
+    free): snapshot it under :data:`BACKUP_PREFIX`, rename it, then rename its
+    constraints, indexes and owned sequences too. ``ALTER TABLE … RENAME``
+    touches none of those, and a stale ``proposals_action_check`` in a
+    ``CheckViolation`` would misdirect whoever reads the traceback — that name
+    is how the 2026-09-05 production bug was identified. Everything runs in the
+    caller's transaction; a later start finds nothing to do. Returns what was
+    renamed, for the deployment log.
+    """
+    renamed: list[str] = []
+    for old, new in LEGACY_TABLES.items():
+        pending = conn.execute(
+            text("SELECT to_regclass(:old) IS NOT NULL AND to_regclass(:new) IS NULL"),
+            {"old": f"public.{old}", "new": f"public.{new}"},
+        ).scalar()
+        if not pending:
+            continue
+        conn.execute(text(f'CREATE TABLE "{BACKUP_PREFIX}{old}" AS TABLE "{old}"'))
+        conn.execute(text(f'ALTER TABLE "{old}" RENAME TO "{new}"'))
+        # Postgres named these <table>_<column>_check, <table>_pkey, and so on;
+        # the LIKE keeps the prefix in step with the table. Renaming the primary
+        # key constraint renames its index as well.
+        like = {"table": f"public.{new}", "pattern": old + "\\_%"}
+        constraints = conn.execute(
+            text(
+                "SELECT conname FROM pg_constraint "
+                "WHERE conrelid = to_regclass(:table) AND conname LIKE :pattern"
+            ),
+            like,
+        ).scalars().all()
+        for name in constraints:
+            conn.execute(
+                text(f'ALTER TABLE "{new}" RENAME CONSTRAINT "{name}" '
+                     f'TO "{TABLE_PREFIX}{name}"')
+            )
+        indexes = conn.execute(
+            text(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' "
+                "AND tablename = :name AND indexname LIKE :pattern"
+            ),
+            {"name": new, "pattern": like["pattern"]},
+        ).scalars().all()
+        for name in indexes:
+            conn.execute(
+                text(f'ALTER INDEX "{name}" RENAME TO "{TABLE_PREFIX}{name}"')
+            )
+        # BIGSERIAL's sequence is owned by the column (pg_depend deptype 'a'),
+        # and the column default refers to it by OID, so renaming it is safe.
+        sequences = conn.execute(
+            text(
+                "SELECT s.relname FROM pg_class s "
+                "JOIN pg_depend d ON d.objid = s.oid AND d.deptype = 'a' "
+                "WHERE s.relkind = 'S' AND d.refobjid = to_regclass(:table) "
+                "AND s.relname LIKE :pattern"
+            ),
+            like,
+        ).scalars().all()
+        for name in sequences:
+            conn.execute(
+                text(f'ALTER SEQUENCE "{name}" RENAME TO "{TABLE_PREFIX}{name}"')
+            )
+        renamed.append(f"{old} → {new}")
+    return renamed
+
+
+def _drop_committed_backup_copies(conn: Connection) -> list[str]:
+    """Drop ``mitroa_backup_<date>_*`` copies once a zip from that day or later
+    is committed under ``files/mitroa/db_backups/``.
+
+    A copy exists only because nothing outside Railway can take a backup. The
+    archive :func:`backup_archive` produces includes every ``mitroa_*`` table,
+    copies included, so an archive dated on or after the copy holds it — and a
+    copy that is in the repository has no reason to stay in the database, where
+    it clutters the ``\\dt`` the rename was meant to tidy. Runs *before*
+    :func:`_rename_legacy_tables`, so a copy taken on this start survives until
+    it has been downloaded and committed. Returns what was dropped, for the log.
+    """
+    copies = conn.execute(
+        text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+            "AND tablename LIKE :pattern ORDER BY tablename"
+        ),
+        {"pattern": TABLE_PREFIX + "backup\\_%"},
+    ).scalars().all()
+    archives = [
+        match.group(1)
+        for path in BACKUPS_DIR.glob("mitroa_db_*.zip")
+        if (match := re.fullmatch(r"mitroa_db_(\d{8})-\d{4}\.zip", path.name))
+    ]
+    dropped: list[str] = []
+    for name in copies:
+        taken = re.match(rf"{TABLE_PREFIX}backup_(\d{{8}})_", name)
+        if taken and any(stamp >= taken.group(1) for stamp in archives):
+            conn.execute(text(f'DROP TABLE "{name}"'))
+            dropped.append(name)
+    return dropped
+
+
+def mitroa_tables() -> list[str]:
+    """Every table of this module, live and backup, as ``\\dt`` would list them."""
+    engine = get_engine()
+    if engine is None:
+        return []
+    with engine.connect() as conn:
+        return conn.execute(
+            text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                "AND tablename LIKE :pattern ORDER BY tablename"
+            ),
+            {"pattern": TABLE_PREFIX + "%"},
+        ).scalars().all()
+
+
+def backup_archive() -> tuple[str, bytes]:
+    """All ``mitroa_*`` tables as CSV files in one zip, with a dated filename.
+
+    The only way data leaves this database: there is no public proxy and no
+    shell, so a backup has to be produced by the app and downloaded. Rows are
+    ordered by their leading columns — the keys — so two archives of the same
+    state diff cleanly. UTF-8 with BOM, so Excel opens the Greek correctly.
+    """
+    engine = get_engine()
+    if engine is None:
+        return "", b""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive, \
+            engine.connect() as conn:
+        for name in mitroa_tables():
+            frame = pd.read_sql(text(f'SELECT * FROM "{name}" ORDER BY 1, 2, 3'), conn)
+            archive.writestr(
+                f"{name}.csv", frame.to_csv(index=False).encode("utf-8-sig")
+            )
+    stamp = datetime.now(ZoneInfo("Europe/Athens")).strftime("%Y%m%d-%H%M")
+    return f"mitroa_db_{stamp}.zip", buffer.getvalue()
 
 
 def is_available() -> bool:
@@ -208,10 +392,13 @@ def bootstrap() -> str:
         from seed_eudoxus import seed_eudoxus
         from seed_external import seed_historical_years
         from seed_perigrammata import seed_perigrammata
+        from seed_timetable import seed_timetable
 
         status = seed_historical_years(engine)
         status = f"{status} · {seed_perigrammata(engine)}"
         status = f"{status} · {seed_eudoxus(engine)}"
+        # After the περιγράμματα: the timetable resolves its course codes there.
+        status = f"{status} · {seed_timetable(engine)}"
         # Report the tables too: without SSH into the container, and with no
         # public proxy to the database, the log line is the only way to confirm
         # a schema change actually landed.
@@ -241,7 +428,7 @@ def load_external_electors(year: int) -> pd.DataFrame:
     query = text(
         """
         SELECT year, field_code, elector_id, characterization, reasoning
-        FROM external_electors
+        FROM mitroa_external_electors
         WHERE year = :year
         ORDER BY field_code,
                  characterization <> 'ΙΔΙΟΥ',
@@ -268,7 +455,9 @@ def stored_years() -> list[int]:
         return []
     with engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT DISTINCT year FROM external_electors ORDER BY year DESC")
+            text(
+                "SELECT DISTINCT year FROM mitroa_external_electors ORDER BY year DESC"
+            )
         )
         return [row[0] for row in rows]
 
@@ -296,13 +485,13 @@ def is_coordinator(email: str | None) -> bool:
 # --------------------------------------------------------------------------
 
 def year_state(year: int) -> dict | None:
-    """The year_status row, or None if the year was never opened."""
+    """The mitroa_year_status row, or None if the year was never opened."""
     engine = get_engine()
     if engine is None:
         return None
     with engine.connect() as conn:
         row = conn.execute(
-            text("SELECT * FROM year_status WHERE year = :year"), {"year": year}
+            text("SELECT * FROM mitroa_year_status WHERE year = :year"), {"year": year}
         ).mappings().first()
     return dict(row) if row else None
 
@@ -325,7 +514,7 @@ def open_year(year: int, baseline_year: int, opened_by: str) -> str:
         conn.execute(
             text(
                 """
-                INSERT INTO year_status (year, status, baseline_year, opened_by)
+                INSERT INTO mitroa_year_status (year, status, baseline_year, opened_by)
                 VALUES (:year, :status, :baseline, :by)
                 """
             ),
@@ -434,7 +623,7 @@ def auto_removals(
 def finalize_year(
     year: int, locked_by: str, blocked_ids: set[int] | None = None
 ) -> str:
-    """Write the computed table into external_electors and freeze the year.
+    """Write the computed table into mitroa_external_electors and freeze the year.
 
     ``blocked_ids`` never reach the stored table: they are filtered out of what
     gets written, the same way they are filtered out of every view.
@@ -463,7 +652,7 @@ def finalize_year(
         conn.execute(
             text(
                 """
-                INSERT INTO external_electors
+                INSERT INTO mitroa_external_electors
                     (year, field_code, elector_id, characterization, reasoning)
                 VALUES (:year, :field_code, :elector_id, :characterization, :reasoning)
                 ON CONFLICT (year, field_code, elector_id) DO NOTHING
@@ -474,7 +663,7 @@ def finalize_year(
         conn.execute(
             text(
                 """
-                UPDATE year_status
+                UPDATE mitroa_year_status
                    SET status = :status, locked_by = :by, locked_at = now()
                  WHERE year = :year
                 """
@@ -504,7 +693,7 @@ def list_proposals(
         clauses.append("status = :status")
         params["status"] = status
     query = text(
-        f"SELECT * FROM proposals WHERE {' AND '.join(clauses)} "
+        f"SELECT * FROM mitroa_proposals WHERE {' AND '.join(clauses)} "
         "ORDER BY decided_at NULLS LAST, created_at, id"
     )
     with engine.connect() as conn:
@@ -538,7 +727,7 @@ def add_proposal(
             conn.execute(
                 text(
                     """
-                    INSERT INTO proposals
+                    INSERT INTO mitroa_proposals
                         (year, field_code, elector_id, action, characterization,
                          reasoning, note, author)
                     VALUES (:year, :field_code, :elector_id, :action, :characterization,
@@ -575,7 +764,7 @@ def decide_proposal(
         updated = conn.execute(
             text(
                 """
-                UPDATE proposals
+                UPDATE mitroa_proposals
                    SET status = :status, decided_by = :by, decided_at = now(),
                        decision_note = :decision_note
                  WHERE id = :id AND status = :pending
@@ -643,7 +832,7 @@ def propose_removals(
         conn.execute(
             text(
                 """
-                INSERT INTO proposals
+                INSERT INTO mitroa_proposals
                     (year, field_code, elector_id, action, characterization,
                      reasoning, note, author)
                 VALUES (:year, :field_code, :elector_id, :action, :characterization,
@@ -677,7 +866,7 @@ def decide_field_proposals(
         decided = conn.execute(
             text(
                 """
-                UPDATE proposals
+                UPDATE mitroa_proposals
                    SET status = :status, decided_by = :by, decided_at = now(),
                        decision_note = :decision_note
                  WHERE year = :year AND field_code = :field_code
@@ -706,7 +895,7 @@ def pending_by_field(year: int) -> pd.DataFrame:
     query = text(
         """
         SELECT field_code, COUNT(*) AS pending
-        FROM proposals
+        FROM mitroa_proposals
         WHERE year = :year AND status = :pending
         GROUP BY field_code
         ORDER BY field_code
@@ -725,7 +914,7 @@ def withdraw_proposal(proposal_id: int, author: str) -> str:
         updated = conn.execute(
             text(
                 """
-                UPDATE proposals
+                UPDATE mitroa_proposals
                    SET status = :withdrawn, decided_by = :author, decided_at = now()
                  WHERE id = :id AND status = :pending AND author = :author
                 """

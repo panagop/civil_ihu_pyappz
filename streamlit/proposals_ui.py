@@ -772,6 +772,33 @@ def _report_block(year: int, projected_all: pd.DataFrame, antikeimena: pd.DataFr
         )
 
 
+def _backup_block() -> None:
+    """Coordinator-only: every ``mitroa_*`` table as CSV, zipped.
+
+    Nothing outside Railway can reach the database, so this button is the one
+    way to take a copy of the μητρώα data off it. The tables are small — the
+    export is instant — but it still sits behind a button rather than running
+    on every rerun of the tab. Shown for a locked year too: that is exactly
+    when a backup is wanted.
+    """
+    with st.expander("Αντίγραφο ασφαλείας της βάσης (CSV)"):
+        tables = db.mitroa_tables()
+        st.caption(
+            "Όλοι οι πίνακες `mitroa_*` ως αρχεία CSV σε ένα zip: "
+            + ", ".join(f"`{name}`" for name in tables)
+            + ". Το αρχείο δεν αποθηκεύεται πουθενά — κατεβάστε το και "
+            "καταχωρίστε το στο αποθετήριο (`files/mitroa/db_backups/`)."
+        )
+        if st.button("Δημιουργία αντιγράφου", key="backup_build"):
+            st.session_state["backup_file"] = db.backup_archive()
+        if "backup_file" in st.session_state:
+            filename, data = st.session_state["backup_file"]
+            st.download_button(
+                f"Λήψη «{filename}»", data=data, file_name=filename,
+                mime="application/zip", key="backup_dl", type="primary",
+            )
+
+
 def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
     """Decide every pending proposal of the subject on screen, in one go."""
     here = db.list_proposals(year, field_code=field_code, status=db.PENDING)
@@ -901,6 +928,9 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
             f"συνδεδεμένος ως {user_email}"
             + (" · **συντονιστής**" if coordinator else "")
         )
+
+    if coordinator:
+        _backup_block()
 
     registry = registry.copy()
     registry[ID_COL] = registry[ID_COL].astype("int64")
