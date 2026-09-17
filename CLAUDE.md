@@ -57,6 +57,7 @@ civil_ihu_pyappz/
 │   │   └── perigrammata_eng_2018.csv # captured, not seeded yet
 │   ├── eudoxus/                      # Εύδοξος — seed input, then archive
 │   │   ├── eudoxus_books_2025-26.xlsx        # the department's export: 291 rows
+│   │   ├── Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv # the 2026-27 export: 305 rows (seeded ΑΝΟΙΧΤΟ)
 │   │   ├── eudoxus_catalogue_20260909.csv    # what Eudoxus said about those 222 books
 │   │   └── eudoxus.py                        # the original standalone script
 │   └── mitroa/                       # Registries — see "Registry data files" below
@@ -684,17 +685,54 @@ where it was written as a standalone script.
 
 ### Seed data
 
-`files/eudoxus/eudoxus_books_2025-26.xlsx` is the department's own export
-(291 rows → 102 course offerings, 291 selections) and
-`eudoxus_catalogue_<YYYYMMDD>.csv` is a one-off dump of what Eudoxus said about
-each of those 222 books, fetched once so the browse tab shows titles rather
-than bare numeric codes from the first run.
+Two department exports, one per year, plus a catalogue dump:
 
-This is the **only** import: from the next year on a list is opened as a copy
-and edited in the app. The catalogue is loaded **only while the table is
+| File | Year | Rows |
+|------|------|------|
+| `eudoxus_books_2025-26.xlsx` | 2025 | 291 → 102 offerings, 291 selections |
+| `Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv` | 2026 | 305 → 105 offerings, 305 selections |
+| `eudoxus_catalogue_<YYYYMMDD>.csv` | — | what Eudoxus said about 222 books |
+
+The catalogue was fetched once so the browse tab shows titles rather than bare
+numeric codes from the first run. It is loaded **only while the table is
 empty** — after that the availability check owns it, and re-applying the dump
-on every restart would replace a fresh answer with a stale one. Seeded years are
-inserted as `ΚΛΕΙΔΩΜΕΝΟ`.
+on every restart would replace a fresh answer with a stale one.
+
+**The year is read out of the filename, not from a fixed prefix**
+(`export_year`): the first export was renamed by hand, the second was dropped
+in under the name Εύδοξος downloads it as. Both `<YYYY>-<YY>` and
+`<YYYY>-<YYYY>` are accepted and the second half must be the following year, so
+the catalogue's `20260909` date stamp cannot be mistaken for a range. `.csv`
+and `.xlsx` carry identical columns, so only the reader differs
+(`read_export`). Exports are seeded in **year order**, not filename order — a
+year needs its baseline in the table before it arrives.
+
+Seeded years are inserted as `ΚΛΕΙΔΩΜΕΝΟ` unless they are listed in
+`OPEN_SEED_YEARS`, which is `{2026: 2025}`: 2026-27 was declared in Εύδοξος
+before this app existed, so its list arrives as a file like 2025-26 did, but it
+is the year people are still working on. It is seeded `ΑΝΟΙΧΤΟ` with
+`baseline_year = 2025`, so page 7 edits it and the admin tab's «Μεταβολές»
+compares it against 2025-26 exactly as if `open_year` had produced it (35
+additions, 21 removals, 3 new course offerings). Two conditions withdraw that
+and leave the year as ordinary history rather than failing the bootstrap: the
+baseline must exist, and **only one year may be open** — a coordinator who has
+already opened one in the app must not find a second appearing underneath them.
+
+From 2027 on a list is opened as a copy and edited in the app; a new file is
+needed only if the department hands over another export.
+
+The 18 book codes new in 2026-27 are **not** in the catalogue dump, so they read
+as «χωρίς έλεγχο» until the availability check is run — absence of an answer is
+not a negative one. All 9 books the dump found unusable were dropped from the
+2026-27 list already.
+
+**`~` on a pandas column of booleans is only safe on `bool` dtype.** A year
+holding a book the catalogue has never seen gives the LEFT JOIN a NULL, pandas
+reads the column back as **object**, and `~` is then the bitwise inversion:
+`~True` is `-2`, `~False` is `-1`, both truthy. With one clean bool column this
+is invisible; the 18 unknown codes of 2026-27 turned 9 real problems into 210.
+`eudoxus_db.unusable_mask` casts first and is the one place the three flags are
+combined — page 7 calls it too.
 
 ## Εβδομαδιαίο πρόγραμμα (page 8, Postgres)
 

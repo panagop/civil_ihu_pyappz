@@ -282,12 +282,7 @@ with tab_edit:
                     to_display(current), width="stretch", hide_index=True
                 )
                 unusable = current[
-                    current["checked_at"].notna()
-                    & (
-                        ~current["found"].fillna(False)
-                        | ~current["active"].fillna(False)
-                        | ~current["selectable"].fillna(False)
-                    )
+                    current["checked_at"].notna() & edb.unusable_mask(current)
                 ]
                 if not unusable.empty:
                     st.warning(

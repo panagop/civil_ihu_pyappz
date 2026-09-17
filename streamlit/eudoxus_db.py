@@ -552,6 +552,26 @@ def upsert_books(rows: list[dict]) -> int:
     return len(payload)
 
 
+def unusable_mask(frame: pd.DataFrame) -> pd.Series:
+    """True where a book cannot be chosen again — false flags, not empty ones.
+
+    ``.astype(bool)`` is what makes this correct, not decoration. A year holding
+    a book the catalogue has never seen gives the LEFT JOIN a NULL, so pandas
+    reads the column back as **object** dtype, and ``~`` on an object Series of
+    Python bools is the *bitwise* inversion: ``~True`` is ``-2`` and ``~False``
+    is ``-1``, both truthy, so every checked book would be reported unusable.
+    With one bool column this is invisible; 2026-27 arrived with 18 unknown
+    codes and turned 9 real problems into 210.
+
+    ``active`` and ``selectable`` are separate flags and both matter: 4 of the 9
+    problems found on 2026-09-09 were active but not selectable.
+    """
+    def flag(column: str) -> pd.Series:
+        return frame[column].fillna(False).astype(bool)
+
+    return ~flag("found") | ~flag("active") | ~flag("selectable")
+
+
 def unavailable_for_year(year: int) -> pd.DataFrame:
     """The rows of a year whose book cannot be chosen again, with the reason.
 
@@ -565,11 +585,7 @@ def unavailable_for_year(year: int) -> pd.DataFrame:
     checked = frame[frame["checked_at"].notna()]
     if checked.empty:
         return checked
-    problems = checked[
-        (~checked["found"].fillna(False))
-        | (~checked["active"].fillna(False))
-        | (~checked["selectable"].fillna(False))
-    ].copy()
+    problems = checked[unusable_mask(checked)].copy()
     problems["reason"] = problems.apply(
         lambda row: (
             row["error"] or "δεν βρέθηκε στο μητρώο"

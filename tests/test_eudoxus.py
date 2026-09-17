@@ -1,15 +1,18 @@
-"""Tests for the Εύδοξος pipeline that need neither a database nor the network.
+"""The Εύδοξος pipeline: the imports and type coercion without a database, then
+the seed itself against a throwaway Postgres (``pgserver``, skipped where it is
+not installed — see ``test_db_rename.py``).
 
-The Postgres instance is Railway-only and service.eudoxus.gr is a third party,
-so what is pinned here is the import and the type coercion — the two places a
-mistake would only show up in production.
+service.eudoxus.gr is a third party, so nothing here touches the network.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,14 +20,22 @@ sys.path.insert(0, str(ROOT / "streamlit"))
 
 import eudoxus_db as edb  # noqa: E402
 import seed_eudoxus as seed  # noqa: E402
+import db  # noqa: E402
 from eudoxus_client import availability_reason  # noqa: E402
+from settings import get_secret  # noqa: E402
 
 WORKBOOK = seed.EUDOXUS_DIR / "eudoxus_books_2025-26.xlsx"
+CSV_EXPORT = seed.EUDOXUS_DIR / "Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv"
 
 
 @pytest.fixture(scope="module")
 def workbook():
-    return seed.read_workbook(WORKBOOK)
+    return seed.read_export(WORKBOOK)
+
+
+@pytest.fixture(scope="module")
+def csv_export():
+    return seed.read_export(CSV_EXPORT)
 
 
 def test_year_label():
@@ -121,8 +132,178 @@ def test_availability_reason(row, expected):
 def test_catalogue_matches_the_workbook():
     """Every book in the list has a catalogue row, or the browse tab shows a gap."""
 
-    _, selections, _ = seed.read_workbook(WORKBOOK)
+    _, selections, _ = seed.read_export(WORKBOOK)
     wanted = {item["book_id"] for item in selections}
     have = {row["book_id"] for row in seed.read_catalogue(seed._latest_catalogue())}
     assert wanted <= have
     assert len(wanted) == 222
+
+
+# --------------------------------------------------------------------------
+# Which file covers which year
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("eudoxus_books_2025-26.xlsx", 2025),
+        ("Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv", 2026),
+        # The catalogue's date stamp is not a year range, and neither is a
+        # second half that does not follow the first.
+        ("eudoxus_catalogue_20260909.csv", None),
+        ("eudoxus_books_2025-28.xlsx", None),
+        ("eudoxus.py", None),
+    ],
+)
+def test_export_year(name, expected):
+    assert seed.export_year(Path(name)) == expected
+
+
+def test_exports_are_found_in_year_order():
+    """2026-27 is seeded with 2025-26 as its baseline, so order matters."""
+    found = seed.find_exports()
+    assert [year for year, _ in found] == sorted(year for year, _ in found)
+    assert dict(found).keys() >= {2025, 2026}
+
+
+# --------------------------------------------------------------------------
+# The 2026-27 list
+# --------------------------------------------------------------------------
+
+def test_csv_export_counts(csv_export):
+    courses, selections, inactive = csv_export
+    assert len(courses) == 105
+    assert len(selections) == 305
+    assert inactive == 0
+
+
+def test_csv_export_keys_are_unique(csv_export):
+    courses, selections, _ = csv_export
+    assert len({(c["course_code"], c["examino"]) for c in courses}) == len(courses)
+    assert len(
+        {(s["course_code"], s["examino"], s["book_id"]) for s in selections}
+    ) == len(selections)
+
+
+def test_csv_export_is_typed_for_postgres(csv_export):
+    """The CSV reader must coerce exactly as the Excel one does."""
+    courses, selections, _ = csv_export
+    for course in courses:
+        assert isinstance(course["examino"], int)
+        assert course["teacher"] is None or isinstance(course["teacher"], str)
+    for selection in selections:
+        assert isinstance(selection["book_id"], int)
+        assert isinstance(selection["priority"], int)
+
+
+def test_2026_is_seeded_as_the_open_year():
+    assert seed.OPEN_SEED_YEARS == {2026: 2025}
+
+
+# --------------------------------------------------------------------------
+# With a database
+# --------------------------------------------------------------------------
+
+pgserver = pytest.importorskip("pgserver")
+
+
+@pytest.fixture(scope="module")
+def server(tmp_path_factory):
+    instance = pgserver.get_server(tmp_path_factory.mktemp("pgdata"))
+    yield instance
+    instance.cleanup()
+
+
+@pytest.fixture(scope="module")
+def database(server, tmp_path_factory):
+    """One seeded database for the module: the seed takes a while."""
+    name = "eudoxus_" + re.sub(r"\W", "_", tmp_path_factory.mktemp("x").name).lower()[:40]
+    server.psql(f"CREATE DATABASE {name}")
+    url = server.get_uri(database=name)
+    previous = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = url
+    if get_secret("DATABASE_URL") != url:
+        pytest.skip("DATABASE_URL is set in secrets.toml and shadows the test one")
+    db.get_engine.clear()
+    db.bootstrap.clear()
+    status = db.bootstrap()
+    assert "Σφάλμα" not in status, status
+    yield url
+    engine = db.get_engine()
+    if engine is not None:
+        engine.dispose()
+    db.get_engine.clear()
+    db.bootstrap.clear()
+    if previous is None:
+        del os.environ["DATABASE_URL"]
+    else:
+        os.environ["DATABASE_URL"] = previous
+
+
+def test_seed_loads_both_years(database):
+    assert edb.stored_years() == [2026, 2025]
+    assert len(edb.courses_for_year(2025)) == 102
+    assert len(edb.courses_for_year(2026)) == 105
+    assert len(edb.load_year(2026)) == 305
+    assert len(edb.book_ids_for_year(2026)) == 228
+
+
+def test_2026_arrives_open_against_2025(database):
+    """The year people are still working on, not history."""
+    state = edb.year_state(2026)
+    assert state["status"] == edb.OPEN
+    assert state["baseline_year"] == 2025
+    assert state["locked_at"] is None
+    assert edb.is_editable(2026)
+    assert edb.open_years() == [2026]
+
+    past = edb.year_state(2025)
+    assert past["status"] == edb.LOCKED
+    assert past["baseline_year"] is None
+
+
+def test_the_coordinator_sees_the_net_change(database):
+    diff = edb.changes_vs_baseline(2026)
+    counts = diff["action"].value_counts().to_dict()
+    assert counts.get(edb.ADD) == 35
+    assert counts.get(edb.REMOVE) == 21
+    # Three course offerings exist only in 2026-27.
+    new_courses = set(map(tuple, edb.courses_for_year(2026)[["course_code", "examino"]].values))
+    old_courses = set(map(tuple, edb.courses_for_year(2025)[["course_code", "examino"]].values))
+    assert new_courses - old_courses == {("ΔΟΜ037", 2), ("ΔΟΜ038", 3), ("ΣΥΓ008", 8)}
+
+
+def test_the_new_books_are_simply_unchecked(database):
+    """18 book codes are new: unknown to the catalogue is not a problem report."""
+    frame = edb.load_year(2026)
+    assert frame[frame["checked_at"].isna()]["book_id"].nunique() == 18
+    # The catalogue dump found 9 books that cannot be chosen again, all of
+    # them in 2025-26: the 2026-27 list already dropped every one. A year
+    # carrying unknown codes must not inflate that count — reading `~` off an
+    # object column once turned these 9 into 210.
+    assert edb.unavailable_for_year(2025)["book_id"].nunique() == 9
+    assert edb.unavailable_for_year(2026).empty
+
+
+def test_unusable_mask_survives_an_unknown_book():
+    """An object-dtype column is what a LEFT JOIN with a miss gives pandas."""
+    frame = pd.DataFrame(
+        {
+            "found": pd.Series([True, True, False, None], dtype=object),
+            "active": pd.Series([True, False, True, None], dtype=object),
+            "selectable": pd.Series([True, True, True, None], dtype=object),
+        }
+    )
+    assert list(edb.unusable_mask(frame)) == [False, True, True, True]
+
+
+def test_seeding_is_idempotent(database):
+    status = seed.seed_eudoxus(db.get_engine())
+    assert "2025-26" in status and "2026-27" in status
+    assert "φορτώθηκαν" not in status
+    assert edb.year_state(2026)["status"] == edb.OPEN
+
+
+def test_an_open_year_is_not_seeded_twice(database):
+    """A coordinator's open year must not be joined by a seeded one."""
+    assert seed._seed_status(db.get_engine(), 2026) == (edb.LOCKED, None)

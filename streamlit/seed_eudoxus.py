@@ -1,14 +1,16 @@
-"""Load the historical Εύδοξος book list into Postgres.
+"""Load the Εύδοξος book lists the department exported into Postgres.
 
-``files/eudoxus/eudoxus_books_<YYYY>-<YY>.xlsx`` is the department's own export
-of the books offered in that academic year, and
-``files/eudoxus/eudoxus_catalogue_<YYYYMMDD>.csv`` is a one-off dump of what
-Eudoxus said about each of those books, fetched once so the browse tab shows
-titles from the first run instead of 222 bare numeric codes.
+Each ``files/eudoxus`` export covers one academic year, named by it — the
+2025-26 list arrived as ``eudoxus_books_2025-26.xlsx``, the 2026-27 one as the
+CSV Εύδοξος downloads («Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv») — and
+``eudoxus_catalogue_<YYYYMMDD>.csv`` is a one-off dump of what Eudoxus said
+about those books, fetched once so the browse tab shows titles from the first
+run instead of bare numeric codes.
 
-This is the *only* import: from the next year on a list is opened as a copy of
-the previous one and edited in the app (`eudoxus_db.open_year`), so this seeder
-exists for the years that predate the app.
+These are the years the app did not produce: from here on a list is opened as a
+copy of the previous one and edited in the app (`eudoxus_db.open_year`). A year
+is seeded as history (ΚΛΕΙΔΩΜΕΝΟ) unless it is in ``OPEN_SEED_YEARS``, which is
+for a list still being worked on when its file arrived.
 
 Called from :func:`db.bootstrap` inside Railway, and idempotent: a year that
 already has courses is skipped, and the catalogue is loaded only while the
@@ -19,6 +21,7 @@ not overwrite fresher answers with the dump.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -28,6 +31,7 @@ from eudoxus_db import (
     BOOKS_TABLE,
     COURSES_TABLE,
     LOCKED,
+    OPEN,
     SELECTIONS_TABLE,
     UPSERT_BOOK_SQL,
     YEARS_TABLE,
@@ -37,9 +41,25 @@ from eudoxus_db import (
 
 ROOT = Path(__file__).resolve().parents[1]
 EUDOXUS_DIR = ROOT / "files" / "eudoxus"
-WORKBOOK_RE = re.compile(r"eudoxus_books_(\d{4})-\d{2}$")
 
-# Workbook header -> column. The department's export is stable enough to match
+# The academic year is read out of the filename rather than from a fixed
+# prefix: the first export was renamed by hand to ``eudoxus_books_2025-26``,
+# the 2026-27 one was dropped in under the name Εύδοξος gives it
+# («Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv»). Both forms of the second half are
+# accepted, and it must be the following year — so a date stamp such as the
+# catalogue's cannot be mistaken for a year range.
+YEAR_RE = re.compile(r"(\d{4})-(\d{2}|\d{4})(?!\d)")
+EXPORT_SUFFIXES = (".xlsx", ".csv")
+
+# Years imported as the list *under preparation* instead of as history, with
+# the year they are compared against. The department declared 2026-27 in
+# Εύδοξος before this app existed, so the list arrives as a file like 2025-26
+# did — but it is the year people are still working on, so it is seeded
+# ΑΝΟΙΧΤΟ with a baseline, and the admin tab's «Μεταβολές» compares it against
+# 2025-26 exactly as if it had been opened from inside the app.
+OPEN_SEED_YEARS = {2026: 2025}
+
+# Export header -> column. The department's export is stable enough to match
 # by name; anything unexpected raises rather than importing a wrong column.
 COLUMNS = {
     "Τίτλος": "title",
@@ -70,9 +90,14 @@ CATALOGUE_COLUMNS = {
 }
 
 
-def read_workbook(path: Path) -> tuple[list[dict], list[dict], int]:
-    """(course offerings, selections, rows skipped) from one export."""
-    frame = pd.read_excel(path)
+def read_export(path: Path) -> tuple[list[dict], list[dict], int]:
+    """(course offerings, selections, rows skipped) from one export.
+
+    Both formats the department has handed over are read here: the 2025-26
+    export arrived as .xlsx, the 2026-27 one as the .csv Εύδοξος downloads.
+    The columns are identical, so only the reader differs.
+    """
+    frame = pd.read_csv(path) if path.suffix == ".csv" else pd.read_excel(path)
     missing = set(COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"{path.name}: λείπουν στήλες {sorted(missing)}")
@@ -133,15 +158,64 @@ def read_catalogue(path: Path) -> list[dict]:
     return rows
 
 
+def export_year(path: Path) -> int | None:
+    """The academic year one export covers, or None if the name does not say."""
+    if path.suffix not in EXPORT_SUFFIXES or path.stem.startswith("eudoxus_catalogue_"):
+        return None
+    match = YEAR_RE.search(path.stem)
+    if not match:
+        return None
+    year, second = int(match.group(1)), match.group(2)
+    expected = str(year + 1)
+    return year if second == (expected if len(second) == 4 else expected[-2:]) else None
+
+
+def find_exports() -> list[tuple[int, Path]]:
+    """Every export in ``files/eudoxus``, oldest year first.
+
+    Year order, not filename order: a year is seeded with the previous one as
+    its baseline, so 2025-26 has to be in the table before 2026-27 arrives —
+    and the two files do not sort into that order by name.
+    """
+    found = [
+        (year, path)
+        for path in sorted(EUDOXUS_DIR.iterdir())
+        if (year := export_year(path)) is not None
+    ]
+    return sorted(found)
+
+
+def _seed_status(engine: Engine, year: int) -> tuple[str, int | None]:
+    """(status, baseline) for a year about to be seeded.
+
+    ``OPEN_SEED_YEARS`` asks for a year to arrive open for editing, but two
+    conditions can withdraw that, and both leave the year as ordinary history
+    rather than failing the whole bootstrap: the baseline it is compared
+    against has to exist, and only one year may be open at a time — a
+    coordinator who has already opened one in the app must not find a second
+    one appearing underneath them.
+    """
+    baseline = OPEN_SEED_YEARS.get(year)
+    if baseline is None:
+        return LOCKED, None
+    with engine.connect() as conn:
+        has_baseline = conn.execute(
+            text(f"SELECT 1 FROM {COURSES_TABLE} WHERE year = :year LIMIT 1"),
+            {"year": baseline},
+        ).first()
+        already_open = conn.execute(
+            text(f"SELECT 1 FROM {YEARS_TABLE} WHERE status = :status LIMIT 1"),
+            {"status": OPEN},
+        ).first()
+    if not has_baseline or already_open:
+        return LOCKED, None
+    return OPEN, baseline
+
+
 def seed_eudoxus(engine: Engine) -> str:
     """Insert every export that has no rows yet, plus the catalogue dump."""
     loaded, skipped = [], []
-    for path in sorted(EUDOXUS_DIR.glob("eudoxus_books_*.xlsx")):
-        match = WORKBOOK_RE.match(path.stem)
-        if not match:
-            continue
-        year = int(match.group(1))
-
+    for year, path in find_exports():
         with engine.connect() as conn:
             already = conn.execute(
                 text(f"SELECT 1 FROM {COURSES_TABLE} WHERE year = :year LIMIT 1"),
@@ -151,17 +225,27 @@ def seed_eudoxus(engine: Engine) -> str:
             skipped.append(year_label(year))
             continue
 
-        courses, selections, inactive = read_workbook(path)
+        courses, selections, inactive = read_export(path)
+        status, baseline = _seed_status(engine, year)
         with engine.begin() as conn:
-            # Seeded years are history: they were submitted long ago, and only
-            # one year is ever open for editing.
+            # Seeded years are history unless OPEN_SEED_YEARS says otherwise:
+            # they were submitted long ago, and only one year is ever open for
+            # editing.
             conn.execute(
                 text(
-                    f"INSERT INTO {YEARS_TABLE} (year, status, opened_by, locked_by, locked_at) "
-                    "VALUES (:year, :status, 'seed', 'seed', now()) "
+                    f"INSERT INTO {YEARS_TABLE} "
+                    "(year, status, baseline_year, opened_by, locked_by, locked_at) "
+                    "VALUES (:year, :status, :baseline, 'seed', :locked_by, :locked_at) "
                     "ON CONFLICT (year) DO NOTHING"
                 ),
-                {"year": year, "status": LOCKED},
+                {
+                    "year": year,
+                    "status": status,
+                    "baseline": baseline,
+                    # An open year has not been locked by anyone yet.
+                    "locked_by": "seed" if status == LOCKED else None,
+                    "locked_at": datetime.now(timezone.utc) if status == LOCKED else None,
+                },
             )
             conn.execute(
                 text(
@@ -182,7 +266,9 @@ def seed_eudoxus(engine: Engine) -> str:
                 [{**selection, "year": year} for selection in selections],
             )
         note = f"{year_label(year)} ({len(courses)} μαθήματα, {len(selections)} επιλογές"
-        note += f", {inactive} ανενεργές γραμμές)" if inactive else ")"
+        note += f", {inactive} ανενεργές γραμμές" if inactive else ""
+        note += f", {status}"
+        note += f", βάση {year_label(baseline)})" if baseline else ")"
         loaded.append(note)
 
     catalogue_note = _seed_catalogue(engine)
