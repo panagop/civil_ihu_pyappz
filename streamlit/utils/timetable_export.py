@@ -123,6 +123,35 @@ def _style_cell(cell, text: str, size: int, bold: bool = False, white: bool = Fa
                 run.font.color.rgb = RGBColor(255, 255, 255)
 
 
+ROOM_SEPARATOR = " & "
+
+
+def _room_legend(df_sem: pd.DataFrame, room_names: dict[str, str]) -> str:
+    """«204 = Αίθουσα 204 · ΤΣ1 = …» for the rooms this table uses, in code order."""
+    codes = {
+        code.strip()
+        for value in df_sem["room"].dropna()
+        for code in str(value).split(ROOM_SEPARATOR)
+        if code.strip()
+    }
+    entries = [
+        f"{code} = {room_names[code]}" if code in room_names else code
+        for code in sorted(codes)
+    ]
+    return " · ".join(entries)
+
+
+def _add_room_legend(doc: Document, legend: str) -> None:
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(4)
+    label = paragraph.add_run("Αίθουσες: ")
+    label.font.bold = True
+    body = paragraph.add_run(legend)
+    for run in (label, body):
+        run.font.name = "Calibri"
+        run.font.size = Pt(8)
+
+
 def _add_semester_table(doc: Document, df_sem: pd.DataFrame) -> None:
     layouts = [
         layout_day(_day_classes(df_sem[df_sem["day"] == day])) for day in DAY_NAMES
@@ -201,9 +230,17 @@ def _add_semester_table(doc: Document, df_sem: pd.DataFrame) -> None:
 
 
 def create_weekly_timetable_document(
-    df: pd.DataFrame, period: str, year_label: str = "2025-2026"
+    df: pd.DataFrame,
+    period: str,
+    year_label: str = "2025-2026",
+    room_names: dict[str, str] | None = None,
 ) -> bytes:
-    """Δημιουργεί Word έγγραφο με εβδομαδιαίο πρόγραμμα μαθημάτων."""
+    """Δημιουργεί Word έγγραφο με εβδομαδιαίο πρόγραμμα μαθημάτων.
+
+    With ``room_names`` (code → name) each semester's page ends with a legend
+    of the rooms it uses; the workbook-backed page writes room names into the
+    cells already and passes nothing.
+    """
     doc = Document()
 
     section = doc.sections[0]
@@ -221,10 +258,15 @@ def create_weekly_timetable_document(
         df_sem = df[df["semester"] == semester]
         if df_sem.empty:
             continue
-        doc.add_heading(f"Εξάμηνο {int(semester)}", level=1)
+        heading = doc.add_heading(f"Εξάμηνο {int(semester)}", level=1)
+        # A break on the heading, not a break paragraph after the table: the
+        # latter lands on a fresh page when the table fills its own.
+        heading.paragraph_format.page_break_before = sem_idx > 0
         _add_semester_table(doc, df_sem)
-        if sem_idx < len(semesters) - 1:
-            doc.add_page_break()
+        if room_names is not None:
+            legend = _room_legend(df_sem, room_names)
+            if legend:
+                _add_room_legend(doc, legend)
 
     buffer = io.BytesIO()
     doc.save(buffer)

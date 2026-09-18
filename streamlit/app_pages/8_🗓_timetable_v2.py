@@ -316,7 +316,13 @@ with tab_export:
         st.warning("Δεν υπάρχουν δεδομένα με τα επιλεγμένα φίλτρα.")
     else:
         # The export reads the workbook's column names; load_term provides them.
-        word_file = create_weekly_timetable_document(export, period, tdb.year_label(year))
+        rooms = tdb.load_rooms()
+        word_file = create_weekly_timetable_document(
+            export,
+            period,
+            tdb.year_label(year),
+            room_names=dict(zip(rooms["code"], rooms["name"])),
+        )
         st.download_button(
             "📥 Λήψη αρχείου Word",
             data=word_file,
