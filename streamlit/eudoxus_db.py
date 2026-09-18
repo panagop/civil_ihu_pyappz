@@ -206,6 +206,37 @@ def load_year(year: int) -> pd.DataFrame:
         return pd.read_sql(query, conn, params={"year": year})
 
 
+# The department's export as Εύδοξος writes it: header → load_year column.
+# The seed reads the same headers (seed_eudoxus.COLUMNS), so a file made here
+# round-trips through the seed unchanged.
+EXPORT_COLUMNS = {
+    "Τίτλος": "course_title",
+    "Καθηγητής": "teacher",
+    "Κωδικός μαθήματος": "course_code",
+    "Εξάμηνο": "examino",
+    "Περίοδος": "period",
+    "Από που δίνονται τα βιβλία": "source",
+    "Book id": "book_id",
+    "Σειρά επιλογής": "priority",
+    "Ενεργό": "active",
+}
+
+
+def export_csv(frame: pd.DataFrame) -> bytes:
+    """A year's list in the CSV format Εύδοξος downloads and accepts.
+
+    Byte-for-byte conventions of the department's own export: UTF-8 without
+    BOM, comma-separated, CRLF line endings, quotes only where a title holds a
+    comma, and ``true`` in «Ενεργό» — every stored selection is an active one.
+    """
+    rows = frame.sort_values(["examino", "course_code", "priority"]).copy()
+    rows["active"] = "true"
+    out = rows[list(EXPORT_COLUMNS.values())].rename(
+        columns={column: header for header, column in EXPORT_COLUMNS.items()}
+    )
+    return out.to_csv(index=False, lineterminator="\r\n").encode("utf-8")
+
+
 def courses_for_year(year: int) -> pd.DataFrame:
     engine = db.get_engine()
     if engine is None:

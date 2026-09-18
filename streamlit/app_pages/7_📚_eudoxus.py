@@ -154,12 +154,24 @@ with tab_browse:
         counters[3].metric("Χωρίς έλεγχο", unknown)
 
         st.dataframe(to_display(shown), width="stretch", hide_index=True)
-        st.download_button(
-            "Λήψη σε Excel",
-            data=to_excel(to_display(shown)),
-            file_name=f"eudoxus_{edb.year_label(browse_year)}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        downloads = st.columns(2)
+        with downloads[0]:
+            st.download_button(
+                "Λήψη σε Excel",
+                data=to_excel(to_display(shown)),
+                file_name=f"eudoxus_{edb.year_label(browse_year)}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Ό,τι φαίνεται στον πίνακα, με τα φίλτρα.",
+            )
+        with downloads[1]:
+            st.download_button(
+                "Λήψη σε CSV (μορφή Εύδοξου)",
+                data=edb.export_csv(frame),
+                file_name=f"Συγγράμματα ΕΥΔΟΞΟΣ {browse_year}-{browse_year + 1}.csv",
+                mime="text/csv",
+                help="Ολόκληρη η λίστα του έτους, ανεξάρτητα από τα φίλτρα, "
+                "στη μορφή του αρχείου που ανεβαίνει στον Εύδοξο.",
+            )
 
 
 # --------------------------------------------------------------------------

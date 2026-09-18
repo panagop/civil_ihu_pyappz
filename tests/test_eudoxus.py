@@ -7,6 +7,7 @@ service.eudoxus.gr is a third party, so nothing here touches the network.
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import sys
@@ -209,6 +210,11 @@ def test_2026_is_seeded_as_the_open_year():
     assert seed.OPEN_SEED_YEARS == {2026: 2025}
 
 
+def test_export_headers_are_what_the_seed_reads():
+    """What the app writes, the seed must read back — same headers, same order."""
+    assert list(edb.EXPORT_COLUMNS) == list(seed.COLUMNS)
+
+
 # --------------------------------------------------------------------------
 # With a database
 # --------------------------------------------------------------------------
@@ -316,6 +322,22 @@ def test_seeding_is_idempotent(database):
 def test_an_open_year_is_not_seeded_twice(database):
     """A coordinator's open year must not be joined by a seeded one."""
     assert seed._seed_status(db.get_engine(), 2026) == (edb.LOCKED, None)
+
+
+def test_csv_export_round_trips_the_official_file(database):
+    """The 2026-27 list exported from the app is the file the department uploaded."""
+    data = edb.export_csv(edb.load_year(2026))
+    assert not data.startswith(b"\xef\xbb\xbf")
+    text = data.decode("utf-8")
+    assert "\r\n" in text and "\n" not in text.replace("\r\n", "")
+    ours = pd.read_csv(io.BytesIO(data))
+    theirs = pd.read_csv(CSV_EXPORT)
+    assert list(ours.columns) == list(theirs.columns)
+    key = ["Κωδικός μαθήματος", "Εξάμηνο", "Book id"]
+    ours = ours.sort_values(key).reset_index(drop=True)
+    theirs = theirs.sort_values(key).reset_index(drop=True)
+    pd.testing.assert_frame_equal(ours, theirs, check_dtype=False)
+    assert len(ours) == 305
 
 
 def test_a_locked_year_cannot_be_deleted(database):
