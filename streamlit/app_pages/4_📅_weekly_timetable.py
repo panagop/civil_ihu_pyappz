@@ -144,6 +144,9 @@ try:
         }
         .fc-timegrid-event {
             white-space: pre-line !important;
+            border: 2px solid #ffffff !important;
+            border-radius: 4px !important;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18) !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -168,6 +171,7 @@ try:
             "selectable": False,
             "dayHeaderFormat": {"weekday": "long"},
             "displayEventTime": False,
+            "slotEventOverlap": False,
         }
 
         semester_num = int(selected_semester.split()[-1])
@@ -312,6 +316,7 @@ try:
                 "selectable": False,
                 "dayHeaderFormat": {"weekday": "long"},
                 "displayEventTime": False,
+                "slotEventOverlap": False,
             }
 
             calendar_key_room = f"room_timetable_{selected_room}"

@@ -32,7 +32,7 @@ warnings.filterwarnings(
 )
 
 st.set_page_config(
-    page_title="Πολιτικοί Μηχανικοί — ΔΙΠΑΕ",
+    page_title="Ψηφιακές υπηρεσίεςΤμήματος Πολιτικών Μηχανικών — ΔΙΠΑΕ",
     page_icon=":material/foundation:",
     initial_sidebar_state="expanded",
 )

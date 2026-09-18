@@ -86,6 +86,12 @@ CALENDAR_CSS = """
 .fc-daygrid-day-number, .fc-toolbar-title, .fc-toolbar-chunk:first-child { display: none !important; }
 .fc-event-title, .fc-event-title-container, .fc-timegrid-event-harness, .fc-event-main,
 .fc-timegrid-event { white-space: pre-line !important; }
+/* Concurrent classes share a colour; without an outline they read as one block. */
+.fc-timegrid-event {
+    border: 2px solid #ffffff !important;
+    border-radius: 4px !important;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18) !important;
+}
 </style>
 """
 REFERENCE_MONDAY = datetime(2025, 1, 6)  # noqa: DTZ001 - a Monday, any Monday
@@ -105,6 +111,7 @@ CALENDAR_OPTIONS = {
     "selectable": False,
     "dayHeaderFormat": {"weekday": "long"},
     "displayEventTime": False,
+    "slotEventOverlap": False,
 }
 
 
