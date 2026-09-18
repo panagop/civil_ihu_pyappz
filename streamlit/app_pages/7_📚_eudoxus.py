@@ -27,6 +27,7 @@ import eudoxus_db as edb  # noqa: E402
 from auth import require_ihu_login  # noqa: E402
 from branding import apply_branding  # noqa: E402
 from eudoxus_client import Eudoxus  # noqa: E402
+from seed_eudoxus import seed_eudoxus  # noqa: E402
 
 require_ihu_login()
 apply_branding()
@@ -423,6 +424,8 @@ with tab_admin:
     if not coordinator:
         st.info("Η καρτέλα αυτή είναι διαθέσιμη στον Συντονιστή.")
     else:
+        if result := st.session_state.pop("admin_delete_result", None):
+            st.success(result)
         st.markdown("### Άνοιγμα νέου έτους")
         if working_year is not None:
             st.info(
@@ -498,3 +501,28 @@ with tab_admin:
             if st.button("Κλείδωμα έτους", disabled=not confirm, key="admin_lock"):
                 st.info(edb.lock_year(working_year, user_email))
                 st.rerun()
+
+            st.divider()
+            st.markdown("### Διαγραφή του ανοιχτού έτους")
+            st.caption(
+                f"Διαγράφει οριστικά τη λίστα, το ιστορικό ενεργειών και το ίδιο το έτος "
+                f"{edb.year_label(working_year)}. Αν υπάρχει αρχείο εξαγωγής για το έτος "
+                "(`files/eudoxus/`), φορτώνεται ξανά από αυτό αμέσως μετά — έτσι "
+                "αντικαθίσταται ένα έτος που άνοιξε ως αντίγραφο με τη λίστα που κατατέθηκε."
+            )
+            confirm_delete = st.checkbox(
+                f"Επιβεβαιώνω τη διαγραφή του {edb.year_label(working_year)} και ό,τι έχει αλλάξει σε αυτό",
+                key="admin_confirm_delete",
+            )
+            if st.button(
+                "Διαγραφή έτους", type="primary", disabled=not confirm_delete, key="admin_delete"
+            ):
+                message = edb.delete_year(working_year, user_email)
+                if message.startswith("Διαγράφηκε"):
+                    with st.spinner("Επαναφόρτωση από το αρχείο…"):
+                        reseed = seed_eudoxus(db.get_engine())
+                    # Shown after the rerun, which rebuilds the tab without the
+                    # deleted year; a message printed here would vanish with it.
+                    st.session_state["admin_delete_result"] = f"{message} {reseed}"
+                    st.rerun()
+                st.warning(message)

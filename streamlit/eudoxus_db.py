@@ -324,6 +324,37 @@ def open_year(year: int, baseline_year: int, opened_by: str) -> str:
     )
 
 
+def delete_year(year: int, deleted_by: str) -> str:
+    """Remove an open year entirely: its list, its audit log and the year row.
+
+    Only the open year can go — a locked one is history. Once the rows are
+    gone the seed sees a year with no courses and loads it again from its
+    file, which is how a year opened by mistake as a copy of the previous one
+    is replaced by the list the department actually submitted.
+    """
+    engine = db.get_engine()
+    if engine is None:
+        return "Δεν υπάρχει βάση δεδομένων."
+    state = year_state(year)
+    if state is None:
+        return f"Το έτος {year_label(year)} δεν υπάρχει στη βάση."
+    if state["status"] != OPEN:
+        return f"Το έτος {year_label(year)} είναι κλειδωμένο και δεν διαγράφεται."
+    counts = {}
+    with engine.begin() as conn:
+        for table in (CHANGES_TABLE, SELECTIONS_TABLE, COURSES_TABLE, YEARS_TABLE):
+            counts[table] = conn.execute(
+                text(f"DELETE FROM {table} WHERE year = :year"), {"year": year}
+            ).rowcount
+    detail = ", ".join(f"{table}: {count}" for table, count in counts.items())
+    # The deployment log is the only trace once the rows are gone.
+    print(f"[eudoxus_db.delete_year] {year_label(year)} από {deleted_by} — {detail}", flush=True)
+    return (
+        f"Διαγράφηκε το έτος {year_label(year)}: {counts[SELECTIONS_TABLE]} επιλογές, "
+        f"{counts[COURSES_TABLE]} μαθήματα, {counts[CHANGES_TABLE]} καταγραφές."
+    )
+
+
 def lock_year(year: int, locked_by: str) -> str:
     """Close the year to further editing."""
     engine = db.get_engine()

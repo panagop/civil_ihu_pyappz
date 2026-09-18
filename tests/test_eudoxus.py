@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from sqlalchemy import text as sa_text
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))
@@ -166,6 +167,14 @@ def test_exports_are_found_in_year_order():
     assert dict(found).keys() >= {2025, 2026}
 
 
+def test_exports_are_named_not_globbed():
+    """Working copies land beside the real file; only the listed one is read."""
+    for year, path in seed.find_exports():
+        assert path.exists(), path
+        assert seed.export_year(path) == year
+    assert seed.EXPORTS[2026] == "Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv"
+
+
 # --------------------------------------------------------------------------
 # The 2026-27 list
 # --------------------------------------------------------------------------
@@ -307,3 +316,39 @@ def test_seeding_is_idempotent(database):
 def test_an_open_year_is_not_seeded_twice(database):
     """A coordinator's open year must not be joined by a seeded one."""
     assert seed._seed_status(db.get_engine(), 2026) == (edb.LOCKED, None)
+
+
+def test_a_locked_year_cannot_be_deleted(database):
+    message = edb.delete_year(2025, "test@ihu.gr")
+    assert "κλειδωμένο" in message
+    assert len(edb.courses_for_year(2025)) == 102
+
+
+def test_delete_open_year_then_reseed_from_file(database):
+    """A year opened by mistake as a copy is replaced by the submitted list.
+
+    Last in the module: it empties and refills the open year.
+    """
+    engine = db.get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa_text(
+                f"INSERT INTO {edb.CHANGES_TABLE} "
+                "(year, course_code, examino, book_id, action, author) "
+                f"VALUES (2026, 'ΔΟΜ037', 2, 1, '{edb.ADD}', 'test@ihu.gr')"
+            )
+        )
+    message = edb.delete_year(2026, "test@ihu.gr")
+    assert message.startswith("Διαγράφηκε")
+    assert "305 επιλογές" in message and "1 καταγραφές" in message
+    assert edb.year_state(2026) is None
+    assert edb.stored_years() == [2025]
+    assert edb.year_changes(2026).empty
+    assert edb.delete_year(2026, "test@ihu.gr").endswith("δεν υπάρχει στη βάση.")
+
+    status = seed.seed_eudoxus(engine)
+    assert "φορτώθηκαν: 2026-27" in status
+    assert len(edb.courses_for_year(2026)) == 105
+    assert len(edb.load_year(2026)) == 305
+    state = edb.year_state(2026)
+    assert state["status"] == edb.OPEN and state["baseline_year"] == 2025

@@ -698,14 +698,26 @@ numeric codes from the first run. It is loaded **only while the table is
 empty** — after that the availability check owns it, and re-applying the dump
 on every restart would replace a fresh answer with a stale one.
 
-**The year is read out of the filename, not from a fixed prefix**
-(`export_year`): the first export was renamed by hand, the second was dropped
-in under the name Εύδοξος downloads it as. Both `<YYYY>-<YY>` and
-`<YYYY>-<YYYY>` are accepted and the second half must be the following year, so
-the catalogue's `20260909` date stamp cannot be mistaken for a range. `.csv`
-and `.xlsx` carry identical columns, so only the reader differs
-(`read_export`). Exports are seeded in **year order**, not filename order — a
-year needs its baseline in the table before it arrives.
+**The exports are named in `EXPORTS`, one file per year — not globbed**
+(since 2026-09-18). Working copies get dropped beside the real file: that day
+three sat next to the official CSV, one of them a different export with 18
+rows that have no εξάμηνο, and a glob seeded whichever sorted first (Latin
+before Greek), which failed every fresh seed on `int(NaN)`. Same reason
+`seed_timetable.WORKBOOKS` is a dict. `export_year` still parses the year out
+of a filename and the tests use it to check each listed file is under the
+right key. `.csv` and `.xlsx` carry identical columns, so only the reader
+differs (`read_export`). Exports are seeded in **year order** — a year needs
+its baseline in the table before it arrives.
+
+**The production 2026-27 was not seeded from the CSV.** The Railway log shows
+2026 already existing when the CSV-capable seeder first ran (2026-09-17
+21:12 UTC) and absent fifteen minutes earlier; nothing but the admin tab's
+«Άνοιγμα έτους» can create a year without printing, so it was opened as a
+copy of 2025-26. `eudoxus_db.delete_year` exists for exactly that: the admin
+tab's coordinator-only «Διαγραφή του ανοιχτού έτους» removes the open year's
+list, audit log and year row (a locked year is refused), then runs
+`seed_eudoxus` at once so the year comes back from its file without a
+restart. The rows are gone for good; the deployment log carries the counts.
 
 Seeded years are inserted as `ΚΛΕΙΔΩΜΕΝΟ` unless they are listed in
 `OPEN_SEED_YEARS`, which is `{2026: 2025}`: 2026-27 was declared in Εύδοξος

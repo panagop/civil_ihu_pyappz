@@ -1,8 +1,8 @@
 """Load the Εύδοξος book lists the department exported into Postgres.
 
-Each ``files/eudoxus`` export covers one academic year, named by it — the
-2025-26 list arrived as ``eudoxus_books_2025-26.xlsx``, the 2026-27 one as the
-CSV Εύδοξος downloads («Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv») — and
+``EXPORTS`` names one ``files/eudoxus`` file per academic year — the 2025-26
+list arrived as ``eudoxus_books_2025-26.xlsx``, the 2026-27 one as the CSV
+Εύδοξος downloads («Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv») — and
 ``eudoxus_catalogue_<YYYYMMDD>.csv`` is a one-off dump of what Eudoxus said
 about those books, fetched once so the browse tab shows titles from the first
 run instead of bare numeric codes.
@@ -170,19 +170,23 @@ def export_year(path: Path) -> int | None:
     return year if second == (expected if len(second) == 4 else expected[-2:]) else None
 
 
-def find_exports() -> list[tuple[int, Path]]:
-    """Every export in ``files/eudoxus``, oldest year first.
+# The exports, one per year, named explicitly rather than globbed: working
+# copies get dropped beside the real file (three of them on 2026-09-18, one
+# with rows that have no εξάμηνο), and a glob would seed whichever sorts
+# first. Same reason ``seed_timetable.WORKBOOKS`` is a dict.
+EXPORTS = {
+    2025: "eudoxus_books_2025-26.xlsx",
+    2026: "Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv",
+}
 
-    Year order, not filename order: a year is seeded with the previous one as
-    its baseline, so 2025-26 has to be in the table before 2026-27 arrives —
-    and the two files do not sort into that order by name.
+
+def find_exports() -> list[tuple[int, Path]]:
+    """The exports, oldest year first.
+
+    Year order matters: a year is seeded with the previous one as its
+    baseline, so 2025-26 has to be in the table before 2026-27 arrives.
     """
-    found = [
-        (year, path)
-        for path in sorted(EUDOXUS_DIR.iterdir())
-        if (year := export_year(path)) is not None
-    ]
-    return sorted(found)
+    return [(year, EUDOXUS_DIR / EXPORTS[year]) for year in sorted(EXPORTS)]
 
 
 def _seed_status(engine: Engine, year: int) -> tuple[str, int | None]:
