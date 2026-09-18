@@ -11,7 +11,7 @@ from utils.timetable_export import create_weekly_timetable_document
 
 st.set_page_config(
     layout="wide",
-    page_title="Εβδομαδιαίο Πρόγραμμα Μαθημάτων",
+    page_title="Εβδομαδιαίο Πρόγραμμα (παλαιό)",
     page_icon="📅",
 )
 
@@ -19,7 +19,13 @@ from branding import apply_branding  # noqa: E402
 
 apply_branding()
 
-st.title("📅 Εβδομαδιαίο Πρόγραμμα Μαθημάτων")
+st.title("📅 Εβδομαδιαίο Πρόγραμμα Μαθημάτων (παλαιό)")
+
+st.warning(
+    "Η σελίδα αυτή διαβάζει το αρχείο Excel και έχει αντικατασταθεί από το "
+    "**Εβδομαδιαίο Πρόγραμμα**, που διαβάζει τη βάση δεδομένων. Διατηρείται "
+    "μόνο για σύγκριση."
+)
 
 period_selection = st.radio(
     "Επιλέξτε εξάμηνο:",

@@ -34,11 +34,11 @@ civil_ihu_pyappz/
 │   │   ├── 0_home.py                 # Landing page + Microsoft login/logout UI
 │   │   ├── 1_📇_perigrammata (legacy).py  # Syllabi v1 (Google Sheets) — superseded by page 6
 │   │   ├── 3_⛱_exams-schedule.py    # Exam schedule (public) — reads files/exams/*.xlsm
-│   │   ├── 4_📅_weekly_timetable.py  # Weekly timetable (public) — reads files/timetables/*.xlsm
+│   │   ├── 4_📅_weekly_timetable (legacy).py  # Timetable v1 (Excel) — superseded by page 8
 │   │   ├── 5_📊_mitroa_v2.py         # Registries v2 (5 tabs) — login gate ACTIVE
 │   │   ├── 6_📇_perigrammata_v2.py   # Syllabi v2 (Postgres, editable) — login gate ACTIVE
 │   │   ├── 7_📚_eudoxus.py           # Εύδοξος book lists (Postgres) — login gate ACTIVE
-│   │   └── 8_🗓_timetable_v2.py      # Timetable v2 (Postgres) — public view, coordinator edits
+│   │   └── 8_📅_weekly_timetable.py  # THE weekly timetable (Postgres) — public view, coordinator edits
 │   └── .streamlit/
 │       ├── config.toml               # Theme — IS committed (see "Branding and theme")
 │       └── secrets.toml              # Google Sheets IDs + auth credentials (NOT in git — create locally)
@@ -150,7 +150,7 @@ the script writes.
 ## Authentication
 
 > **Active since 2026-09-06.** Microsoft login works in all three environments.
-> Gated: pages 1, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3 and 4 —
+> Gated: pages 1, 5, 6 and 7 (`require_ihu_login()`). Public: pages 3, 4 (legacy) and 8 —
 > timetables and exam schedules carry no personal data.
 >
 > `st.login()` raises `StreamlitAuthError` where `[auth]` is missing, so never
@@ -748,9 +748,11 @@ combined — page 7 calls it too.
 
 ## Εβδομαδιαίο πρόγραμμα (page 8, Postgres)
 
-Page 4 reads `files/timetables/2025-2026.xlsm` and **stays as it is** until
-told otherwise. Page 8 shows the same five views from the database and adds
-the preparation of the next semester. Viewing is public like page 4; editing
+**Page 8 is now the weekly timetable** (renamed 2026-09-18, see "Navigation"):
+it shows five views from the database and adds the preparation of the next
+semester. Page 4, which reads `files/timetables/2025-2026.xlsm`, is legacy —
+kept for comparison, out of the navigation unless «Παλαιές σελίδες» is ticked,
+and due for deletion. Viewing is public as it was on page 4; editing
 is for `coordinator_emails` only (decided 2026-09-15), so the page checks the
 role where it matters instead of gating itself with `require_ihu_login`.
 
@@ -906,7 +908,7 @@ Two colours, both sampled from the logo files rather than picked by eye:
 calls `st.logo`. **`st.logo` applies to the page it is called from, not to the
 app**, so every page script calls it — that is why it is a helper and not one
 line in `home.py`. The module deliberately imports nothing but Streamlit,
-because pages 3 and 4 are public and import no other shared module.
+because pages 3, 4 and 8 are public and import no other shared module.
 
 **The logos are committed under `files/logos/`, not hot-linked.** The
 department's URLs are CMS-generated (`/wp-content/uploads/2026/02/…`) and will
@@ -949,6 +951,19 @@ carries real Greek titles instead of `5_📊_mitroa_v2`-style filenames.
   the emoji), so `/mitroa_v2`, `/exams-schedule` and the rest still resolve and
   old links keep working. The numbers no longer order anything — the list in
   `home.py` does — but renaming a file changes its URL.
+- **That rule was used deliberately on 2026-09-18**: page 8 was renamed
+  `8_🗓_timetable_v2.py` → `8_📅_weekly_timetable.py`, which hands it
+  `/weekly_timetable` — the URL the workbook-backed page had — so links people
+  already hold now reach the database version. Page 4 became
+  `4_📅_weekly_timetable (legacy).py` and moved to `/weekly_timetable_(legacy)`.
+  A rename is the only way to move a URL; there is no redirect.
+- **Superseded pages are listed in `LEGACY_PAGES`, not `PAGES`**, and reach
+  `st.navigation` only when the sidebar's «Παλαιές σελίδες» checkbox is ticked
+  — a page absent from the list never runs. The checkbox lives in the router
+  because the list is built before any page runs, and it is cheap enough to be
+  worth what every page pays for it. Unticking it while a legacy page is open
+  is safe: Streamlit answers an unknown path with the `default=True` page, so
+  the user lands on «Αρχική».
 - Titles are passed explicitly and repeat what each page sets in its own
   `st.set_page_config(page_title=…)`, so the sidebar label and the browser tab
   agree. Icons are passed explicitly too and are the same emoji the filenames
@@ -972,7 +987,7 @@ Update these paths inside the page files when switching academic year:
 | Exam schedule | `files/exams/exams-2026-06.xlsm` |
 | Timetable | `files/timetables/2025-2026.xlsm` |
 
-Pages 3 and 4 hardcode their file; page 5 discovers files by glob, so a new
+Pages 3 and 4 hardcode their file (page 8 reads the database); page 5 discovers files by glob, so a new
 yearly export appears in its dropdowns with no code change.
 
 ## Page 5 — μητρώα v2

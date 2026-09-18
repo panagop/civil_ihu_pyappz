@@ -1,14 +1,20 @@
-"""Εβδομαδιαίο πρόγραμμα v2 — the timetable from Postgres, and its preparation.
+"""Εβδομαδιαίο πρόγραμμα — the timetable from Postgres, and its preparation.
 
-Page 4 reads ``files/timetables/<year>.xlsm`` and stays as it is. This page
-shows the same five views from the database (``timetable_db``) and adds three
-tabs: **Προετοιμασία**, where a coordinator opens the next term as a copy of
-the same period one year earlier, places and moves classes and locks it;
-**Προσωπικό**, the staff list with a per-term active flag; **Αίθουσες**.
+**This is the weekly timetable.** It shows five views from the database
+(``timetable_db``) and adds three tabs: **Προετοιμασία**, where a coordinator
+opens the next term as a copy of the same period one year earlier, places and
+moves classes and locks it; **Προσωπικό**, the staff list with a per-term
+active flag; **Αίθουσες**.
 
-Viewing is public, like page 4 — a timetable carries no personal data. Editing
-is for ``coordinator_emails`` only (decided 2026-09-15), so the page does not
-gate itself with ``require_ihu_login``; it checks the role where it matters.
+It replaced the workbook-backed page on 2026-09-18 and took its filename with
+it, because the filename is what gives a page its URL — so ``/weekly_timetable``
+still resolves and now lands here. The old page survives as
+``4_📅_weekly_timetable (legacy).py``, out of the navigation unless the
+sidebar's «Παλαιές σελίδες» box is ticked (see ``home.py``).
+
+Viewing is public — a timetable carries no personal data. Editing is for
+``coordinator_emails`` only (decided 2026-09-15), so the page does not gate
+itself with ``require_ihu_login``; it checks the role where it matters.
 """
 
 import io
@@ -22,8 +28,8 @@ from streamlit_calendar import calendar
 
 st.set_page_config(
     layout="wide",
-    page_title="Εβδομαδιαίο πρόγραμμα v2",
-    page_icon="🗓",
+    page_title="Εβδομαδιαίο Πρόγραμμα",
+    page_icon="📅",
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -37,7 +43,7 @@ from utils.timetable_export import create_weekly_timetable_document  # noqa: E40
 apply_branding()
 db.bootstrap()
 
-st.title("🗓 Εβδομαδιαίο πρόγραμμα μαθημάτων")
+st.title("📅 Εβδομαδιαίο πρόγραμμα μαθημάτων")
 
 if not db.is_available():
     st.error(

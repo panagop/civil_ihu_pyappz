@@ -353,7 +353,7 @@ def test_page_renders(database):
     """
     from streamlit.testing.v1 import AppTest
 
-    page = ROOT / "streamlit" / "app_pages" / "8_🗓_timetable_v2.py"
+    page = ROOT / "streamlit" / "app_pages" / "8_📅_weekly_timetable.py"
     app = AppTest.from_file(str(page), default_timeout=300)
     app.run()
     assert not app.exception, [str(e.value) for e in app.exception]
@@ -392,7 +392,7 @@ def test_page_toggle_offers_every_semester(database, monkeypatch):
     monkeypatch.setattr(auth, "is_authorized", lambda: True)
     monkeypatch.setattr(db, "is_coordinator", lambda email: True)
 
-    page = ROOT / "streamlit" / "app_pages" / "8_🗓_timetable_v2.py"
+    page = ROOT / "streamlit" / "app_pages" / "8_📅_weekly_timetable.py"
     app = AppTest.from_file(str(page), default_timeout=300)
     app.run()
     assert not app.exception, [str(e.value) for e in app.exception]
