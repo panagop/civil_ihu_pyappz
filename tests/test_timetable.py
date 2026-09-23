@@ -88,6 +88,18 @@ def test_catalogue_is_one_row_per_code_with_the_newest_name():
     assert catalogue.loc["ΔΟΜ004", "course_name"] == "Τεχνική Μηχανική Ι"
     assert catalogue.loc["ΔΟΜ007", "examina"] == {2018: 3, 2025: 4}
     assert catalogue.loc["ΧΧΧ001", "examina"] == {}
+    assert catalogue.loc["ΣΥΓ017", "names"] == {2018: "Οργάνωση Εργοταξίου", 2025: "Προγραμματισμός Έργων"}
+
+
+def test_title_options():
+    # Programmes agree: one title, the default.
+    assert tdb.title_options({2018: "Οικοδομική Ι", 2025: "Οικοδομική Ι"}) == {None: "Οικοδομική Ι"}
+    # They disagree (ΣΥΓ017): the newest is the default, the older one is picked by year.
+    assert tdb.title_options({2018: "Οργάνωση Εργοταξίου", 2025: "Προγραμματισμός Έργων"}) == {
+        None: "Προγραμματισμός Έργων",
+        2018: "Οργάνωση Εργοταξίου",
+    }
+    assert tdb.title_options({}) == {}
 
 
 def test_courses_for_semester():
@@ -337,6 +349,26 @@ def test_open_copy_edit_and_lock(database):
     term = tdb.load_term(2026, tdb.WINTER)
     moved = term[term["course_code"] == "ΥΔΡ002"].iloc[0]
     assert moved["examino"] == 3 and moved["course_name"] == "Μηχανική των Ρευστών"
+
+    # ΣΥΓ017 taught as the 2018 course: the row prints the 2018 title, and
+    # editing it back to the default restores the 2025 one.
+    assert tdb.add_class(
+        2026, tdb.WINTER, examino=9, course_code="ΣΥΓ017", section="Ε", name_curriculum=2018,
+        instructor_ids=[], room_codes=[], day=None, start_hour=None, duration=None, author="c@ihu.gr",
+    ) == ""
+    term = tdb.load_term(2026, tdb.WINTER)
+    old_title = term[(term["course_code"] == "ΣΥΓ017") & (term["section"] == "Ε")].iloc[0]
+    assert old_title["course_name"] == "Οργάνωση Εργοταξίου και Δομικές Μηχανές"
+    assert term[(term["course_code"] == "ΣΥΓ017") & (term["section"] == "Θ")].iloc[0][
+        "course_name"
+    ] == "Προγραμματισμός και Διαχείριση Τεχνικών Έργων"
+    assert tdb.update_class(
+        int(old_title["id"]), examino=9, section="Ε", instructor_ids=[], room_codes=[],
+        day=None, start_hour=None, duration=None, name_suffix=None, notes=None, author="c@ihu.gr",
+        name_curriculum=None,
+    ) == ""
+    term = tdb.load_term(2026, tdb.WINTER)
+    assert term[term["id"] == old_title["id"]].iloc[0]["course_name"] == "Προγραμματισμός και Διαχείριση Τεχνικών Έργων"
 
     assert tdb.lock_term(2026, tdb.WINTER, "c@ihu.gr") == ""
     assert not tdb.open_terms()

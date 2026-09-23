@@ -396,6 +396,13 @@ with tab_prepare:
         room_options = list(rooms_frame["code"])
         room_names = dict(zip(rooms_frame["code"], rooms_frame["name"]))
         catalogue = tdb.course_catalogue(year, period)
+        titles_by_code = {
+            code: tdb.title_options(names) for code, names in zip(catalogue["course_code"], catalogue["names"])
+        }
+
+        def name_curriculum_of(row) -> int | None:
+            value = row["name_curriculum"]
+            return None if pd.isna(value) else int(value)
 
         st.markdown("#### Επεξεργασία ανά εξάμηνο")
         semesters = sorted(
@@ -469,22 +476,32 @@ with tab_prepare:
             all_semesters = st.toggle("Δυνατότητα επιλογής από όλα τα εξάμηνα", key="add_all_semesters")
             offered = tdb.courses_for_semester(catalogue, semester, all_semesters)
 
-            # label -> (code, suffix to start from). What this εξάμηνο already
-            # has comes first; then what the programmes offer, with where each
-            # programme places it.
-            choices: dict[str, tuple[str, str]] = {}
-            for _, row in subset.drop_duplicates("course_code").iterrows():
-                choices[f"{row['course_code']} — {row['course_name']}"] = (row["course_code"], row["name_suffix"])
-            present = set(subset["course_code"])
-            for _, row in offered[~offered["course_code"].isin(present)].iterrows():
+            # label -> (code, suffix to start from, name_curriculum). What this
+            # εξάμηνο already has comes first; then what the programmes offer,
+            # with where each programme places it. A code whose programmes
+            # disagree on the title (ΣΥΓ017) is offered once per title.
+            choices: dict[str, tuple[str, str, int | None]] = {}
+            present: set[tuple[str, int | None]] = set()
+            for _, row in subset.iterrows():
+                key = (row["course_code"], name_curriculum_of(row))
+                if key not in present:
+                    present.add(key)
+                    choices[f"{row['course_code']} — {row['course_name']}"] = (key[0], row["name_suffix"], key[1])
+            for _, row in offered.iterrows():
                 hint = tdb.examina_label(row["examina"]) + ("" if row["in_term"] else " · νέο")
-                choices[f"{row['course_code']} — {row['course_name']} ({hint})"] = (row["course_code"], "")
+                titles = tdb.title_options(row["names"])
+                for name_curriculum, title in titles.items():
+                    if (row["course_code"], name_curriculum) in present:
+                        continue
+                    source = f" · τίτλος {name_curriculum or max(row['names'])}" if len(titles) > 1 else ""
+                    label = f"{row['course_code']} — {title} ({hint}{source})"
+                    choices[label] = (row["course_code"], "", name_curriculum)
             if not choices:
                 st.info("Κανένα μάθημα για επιλογή· ενεργοποιήστε την επιλογή από όλα τα εξάμηνα.")
                 return
 
             choice = st.selectbox("Μάθημα:", options=list(choices), key="add_course")
-            code, default_suffix = choices[choice]
+            code, default_suffix, name_curriculum = choices[choice]
             with st.form("add_class", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 section = c1.selectbox("Τμήμα:", options=sections, key="add_section")
@@ -506,7 +523,8 @@ with tab_prepare:
                         year, period, examino=semester, course_code=code,
                         section=section, instructor_ids=instructors, room_codes=rooms,
                         day=day, start_hour=start, duration=duration,
-                        name_suffix=suffix, notes=notes, author=user_email,
+                        name_suffix=suffix, name_curriculum=name_curriculum,
+                        notes=notes, author=user_email,
                     )
                     if error:
                         st.error(error)
@@ -549,6 +567,18 @@ with tab_prepare:
                     "Αίθουσες:", options=room_options, format_func=lambda c: f"{c} — {room_names[c]}",
                     default=[c for c in row["room_codes"] if c in room_names], key=f"{prefix}_rooms",
                 )
+                # Only for a code whose programmes disagree on the title.
+                titles = titles_by_code.get(row["course_code"], {})
+                current_title = name_curriculum_of(row)
+                if len(titles) > 1:
+                    options = list(titles)
+                    name_curriculum = st.selectbox(
+                        "Τίτλος:", options=options,
+                        index=options.index(current_title) if current_title in options else 0,
+                        format_func=lambda c: titles[c], key=f"{prefix}_title",
+                    )
+                else:
+                    name_curriculum = current_title
                 day, start, duration = placement_fields(prefix, row)
                 notes = st.text_input("Παρατηρήσεις:", value=row["notes"], key=f"{prefix}_notes")
                 b1, b2 = st.columns(2)
@@ -557,6 +587,7 @@ with tab_prepare:
                         class_id, examino=int(examino), section=section, instructor_ids=instructors,
                         room_codes=rooms, day=day, start_hour=start, duration=duration,
                         name_suffix=suffix, notes=notes, author=user_email,
+                        name_curriculum=name_curriculum,
                     )
                     if error:
                         st.error(error)

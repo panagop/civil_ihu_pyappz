@@ -808,9 +808,14 @@ fresh database. `perigrammata_courses.curriculum` stays: the περιγράμμ�
 - **Names come from the περιγράμματα, by code, the newest programme winning**
   (`NEWEST_NAME_SQL`, a lateral join in `load_term`) — so the seed must run
   after the περιγράμματα one. Of the 84 shared codes only ΣΥΓ017 changed its
-  name; the timetable prints the 2025 name everywhere, locked 2025-26 terms
-  included, while the περιγράμματα keep both. (Page 3 reads names from the
-  exams workbook, so there the new name is typed into the next file.)
+  name — and it is really a different course («Οργάνωση Εργοταξίου και Δομικές
+  Μηχανές» in 2018, «Προγραμματισμός και Διαχείριση Τεχνικών Έργων» in 2025).
+  So a row may carry `name_curriculum` (nullable, added 2026-09-23): the
+  programme whose title it prints, NULL meaning the newest. `title_options`
+  offers the choice only where the programmes disagree; «Νέα γραμμή» lists such
+  a code once per title and the edit form gets a «Τίτλος» selectbox.
+  `open_term` copies the column. (Page 3 reads names from the exams workbook,
+  so there the name is typed into the file.)
 - **The row's εξάμηνο is the timetable's**, not the programme's: a course added
   while editing the 3rd εξάμηνο sits in the 3rd whatever either programme says.
   20 shared codes changed εξάμηνο, 19 of them to the other period.

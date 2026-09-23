@@ -33,8 +33,11 @@ Which programme an εξάμηνο follows in a given year is deliberately not
 modelled (dropped 2026-09-16): during the transition courses may move between
 winter and spring, and nobody can say in advance when. Names come from
 ``perigrammata_courses`` by code, the newest programme that has it winning
-(``NEWEST_NAME_SQL``) — so ΣΥΓ017 prints its 2025 name everywhere, while the
-περιγράμματα keep both. The only name-ish thing kept here is ``name_suffix``,
+(``NEWEST_NAME_SQL``). The one exception is a code whose programmes disagree
+on the name — ΣΥΓ017 is «Οργάνωση Εργοταξίου και Δομικές Μηχανές» in 2018 and
+«Προγραμματισμός και Διαχείριση Τεχνικών Έργων» in 2025 — where a row may set
+``name_curriculum`` to print another programme's title (added 2026-09-23).
+Besides that, the only name-ish thing kept here is ``name_suffix``,
 the «ΔΥ, ΥΕ» elective-group marker the printed timetable carries after the
 course name.
 """
@@ -152,6 +155,7 @@ CREATE TABLE IF NOT EXISTS {CLASSES_TABLE} (
     course_code TEXT    NOT NULL,
     section     TEXT    NOT NULL,
     name_suffix TEXT,
+    name_curriculum INTEGER,
     day         INTEGER CHECK (day BETWEEN 1 AND 5),
     start_hour  INTEGER CHECK (start_hour BETWEEN {FIRST_HOUR} AND {LAST_HOUR - 1}),
     duration    INTEGER CHECK (duration BETWEEN 1 AND {MAX_DURATION}),
@@ -198,6 +202,9 @@ CREATE INDEX IF NOT EXISTS timetable_changes_term_idx
 -- schema: on a fresh database the table would not exist yet.
 -- 2026-09-16: a class is a course code; the programme stamp is gone.
 ALTER TABLE {CLASSES_TABLE} DROP COLUMN IF EXISTS curriculum;
+-- 2026-09-23: which programme's title to print, for a code whose programmes
+-- disagree (ΣΥΓ017). NULL is the newest.
+ALTER TABLE {CLASSES_TABLE} ADD COLUMN IF NOT EXISTS name_curriculum INTEGER;
 """
 
 
@@ -301,9 +308,9 @@ def open_term(
                 text(
                     f"INSERT INTO {CLASSES_TABLE} "
                     "(year, period, examino, course_code, section, "
-                    " name_suffix, day, start_hour, duration, notes, updated_by) "
+                    " name_suffix, name_curriculum, day, start_hour, duration, notes, updated_by) "
                     "SELECT :year, :period, examino, course_code, section, "
-                    "       name_suffix, day, start_hour, duration, notes, :by "
+                    "       name_suffix, name_curriculum, day, start_hour, duration, notes, :by "
                     f"FROM {CLASSES_TABLE} WHERE id = :old_id RETURNING id"
                 ),
                 {**params, "old_id": old_id},
@@ -400,17 +407,18 @@ def term_changes(year: int, period: str) -> pd.DataFrame:
 # Reading a term
 # --------------------------------------------------------------------------
 
-# A course's name, by code alone: the newest programme that has the code wins.
-# Codes carried over from 2018 kept their code, and only one of 84 changed its
-# name (ΣΥΓ017), which the timetable prints in its 2025 form from now on.
+# A course's name, by code: the programme the row names in ``name_curriculum``
+# if it has the code, otherwise the newest that does. Codes carried over from
+# 2018 kept their code, and only one of 84 changed its name (ΣΥΓ017) — a term
+# that still teaches the 2018 course picks that title per row.
 NEWEST_NAME_SQL = f"""
 SELECT p.name FROM {PERIGRAMMATA_TABLE} p
 WHERE p.locale = 'gr' AND p.code = c.course_code
-ORDER BY p.curriculum DESC LIMIT 1
+ORDER BY (p.curriculum = c.name_curriculum) DESC NULLS LAST, p.curriculum DESC LIMIT 1
 """
 
 _LOAD_TERM_SQL = f"""
-SELECT c.id, c.examino, c.course_code, c.section, c.name_suffix,
+SELECT c.id, c.examino, c.course_code, c.section, c.name_suffix, c.name_curriculum,
        c.day, c.start_hour, c.duration, c.notes, c.updated_by, c.updated_at,
        n.name AS course_name,
        COALESCE(i.names, '') AS instructors,
@@ -616,6 +624,7 @@ def add_class(
     start_hour: int | None,
     duration: int | None,
     name_suffix: str | None = None,
+    name_curriculum: int | None = None,
     notes: str | None = None,
     author: str,
 ) -> str:
@@ -631,10 +640,10 @@ def add_class(
         class_id = conn.execute(
             text(
                 f"INSERT INTO {CLASSES_TABLE} "
-                "(year, period, examino, course_code, section, name_suffix, "
+                "(year, period, examino, course_code, section, name_suffix, name_curriculum, "
                 " day, start_hour, duration, notes, updated_by) "
                 "VALUES (:year, :period, :examino, :course_code, :section, "
-                "        :name_suffix, :day, :start_hour, :duration, :notes, :author) "
+                "        :name_suffix, :name_curriculum, :day, :start_hour, :duration, :notes, :author) "
                 "RETURNING id"
             ),
             {
@@ -644,6 +653,7 @@ def add_class(
                 "course_code": course_code.strip(),
                 "section": section,
                 "name_suffix": name_suffix or None,
+                "name_curriculum": name_curriculum,
                 "day": day,
                 "start_hour": start_hour,
                 "duration": duration,
@@ -669,6 +679,7 @@ def update_class(
     name_suffix: str | None,
     notes: str | None,
     author: str,
+    name_curriculum: int | None = None,
 ) -> str:
     engine = db.get_engine()
     if engine is None:
@@ -685,7 +696,8 @@ def update_class(
         conn.execute(
             text(
                 f"UPDATE {CLASSES_TABLE} SET examino = :examino, section = :section, "
-                "name_suffix = :name_suffix, day = :day, start_hour = :start_hour, "
+                "name_suffix = :name_suffix, name_curriculum = :name_curriculum, "
+                "day = :day, start_hour = :start_hour, "
                 "duration = :duration, notes = :notes, updated_by = :author, "
                 "updated_at = now() WHERE id = :id"
             ),
@@ -694,6 +706,7 @@ def update_class(
                 "examino": examino,
                 "section": section,
                 "name_suffix": name_suffix or None,
+                "name_curriculum": name_curriculum,
                 "day": day,
                 "start_hour": start_hour,
                 "duration": duration,
@@ -785,9 +798,11 @@ def build_catalogue(programmes: pd.DataFrame) -> pd.DataFrame:
     ``course_name`` is the newest programme's (the rule ``NEWEST_NAME_SQL``
     applies to a term); ``examina`` maps each programme that has the code to
     its εξάμηνο there — ``{2018: 3, 2025: 4}`` for ΔΟΜ007 — and leaves out a
-    programme where the εξάμηνο is blank. Pure, so testable without a DB.
+    programme where the εξάμηνο is blank. ``names`` maps every programme that
+    has the code to its title there; see ``title_options``. Pure, so testable
+    without a DB.
     """
-    columns = ["course_code", "course_name", "examina"]
+    columns = ["course_code", "course_name", "examina", "names"]
     if programmes.empty:
         return pd.DataFrame(columns=columns)
     ordered = programmes.sort_values(["course_code", "curriculum"], ascending=[True, False])
@@ -798,7 +813,10 @@ def build_catalogue(programmes: pd.DataFrame) -> pd.DataFrame:
             for curriculum, examino in zip(group["curriculum"], group["examino"])
             if pd.notna(examino)
         }
-        rows.append({"course_code": code, "course_name": group["course_name"].iloc[0], "examina": examina})
+        names = {int(c): name for c, name in zip(group["curriculum"], group["course_name"])}
+        rows.append(
+            {"course_code": code, "course_name": group["course_name"].iloc[0], "examina": examina, "names": names}
+        )
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -816,6 +834,22 @@ def courses_for_semester(
     if all_semesters or catalogue.empty:
         return catalogue
     return catalogue[[semester in examina.values() for examina in catalogue["examina"]]]
+
+
+def title_options(names: dict[int, str]) -> dict[int | None, str]:
+    """The titles a row of this code may print, keyed by ``name_curriculum``.
+
+    One entry keyed ``None`` (the newest programme's) when every programme
+    agrees; otherwise one per programme, newest first — ΣΥΓ017 offers both its
+    2025 and its 2018 title.
+    """
+    if len(set(names.values())) <= 1:
+        return {None: next(iter(names.values()))} if names else {}
+    newest = max(names)
+    return {
+        (None if curriculum == newest else curriculum): names[curriculum]
+        for curriculum in sorted(names, reverse=True)
+    }
 
 
 def programme_semesters(catalogue: pd.DataFrame, period: str) -> set[int]:
@@ -841,7 +875,7 @@ def course_catalogue(year: int, period: str) -> pd.DataFrame:
     """``build_catalogue`` from the database, with ``in_term`` for the term's codes."""
     engine = db.get_engine()
     if engine is None:
-        return pd.DataFrame(columns=["course_code", "course_name", "examina", "in_term"])
+        return pd.DataFrame(columns=["course_code", "course_name", "examina", "names", "in_term"])
     with engine.connect() as conn:
         programmes = pd.read_sql(
             text(
