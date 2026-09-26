@@ -759,7 +759,8 @@ role where it matters instead of gating itself with `require_ihu_login`.
 Tables in [streamlit/timetable_db.py](streamlit/timetable_db.py):
 `timetable_staff` · `timetable_staff_terms` · `timetable_rooms` ·
 `timetable_terms` · `timetable_classes` · `timetable_class_instructors` ·
-`timetable_class_rooms` · `timetable_changes`.
+`timetable_class_rooms` · `timetable_changes` · `timetable_snapshots` ·
+`timetable_snapshot_classes`.
 
 ### A term is a copy of last year's same period
 
@@ -768,6 +769,41 @@ A *term* is `(year, period)`: `(2026, 'Χειμερινό')` is the winter of 20
 who was active — and the coordinator rearranges; `lock_term` freezes it. One
 term is open at a time. Same model as Εύδοξος, for the same reason: one owner,
 so no proposals machinery.
+
+### Εκδοχές: save points of the open term (added 2026-09-26)
+
+A coordinator can freeze the open term as «Επιλογή Α», «Επιλογή Β»…, compare
+any two of those and the working timetable (counts, conflicts, a
+change-by-change table and two weeks side by side), export one to Word, and
+restore one. They live in the Προετοιμασία tab only, for coordinators.
+
+- **Save points, not parallel drafts.** The term stays the one working
+  timetable that every view shows and every form edits. Editable drafts would
+  need a "which draft?" on every form and a draft filter on every query in
+  `timetable_db`, and one forgotten filter would leak a draft into the public
+  timetable. So snapshots are separate tables, not a column on
+  `timetable_classes`.
+- Instructors and rooms are **arrays** in `timetable_snapshot_classes`: a
+  frozen copy is never edited row by row. `load_snapshot` returns exactly
+  `load_term`'s columns, so `conflicts`, the calendar and the Word export work
+  on it unchanged. A snapshot row stores **every column of a class that
+  `SNAPSHOT_FIELDS` names** — including `name_curriculum`, since
+  `NEWEST_NAME_SQL` reads it — so a column added to `timetable_classes` must be
+  added there and to `timetable_snapshot_classes`, or versions silently lose it.
+- Rows carry `source_class_id`, the working row they came from; comparison
+  (`compare_frames`, pure) and restore match on it, so a moved class reads as
+  «Άλλαξε», not removed + added. `restore_snapshot` updates rows in place,
+  deletes the extra ones, and re-inserts deleted ones. A re-inserted row gets a
+  new id, and **every version of the term is re-pointed to it**. Without that,
+  the version just restored would differ from the term it produced, and each
+  restore would churn the row again.
+- The page's restore saves the current state as a version first (checkbox, on
+  by default), so a restore never loses work.
+- `lock_term` deletes the term's snapshots, since they can no longer be
+  restored. The `ΚΛΕΙΔΩΜΑ` log line gives the count. Saving, restoring and
+  deleting a version are logged as `ΕΚΔΟΧΗ` / `ΕΠΑΝΑΦΟΡΑ`, which needed the
+  `timetable_changes.action` CHECK re-created at the end of the timetable
+  `SCHEMA_SQL`.
 
 ### Staff, not instructor
 

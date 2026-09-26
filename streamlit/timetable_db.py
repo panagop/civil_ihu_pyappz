@@ -25,6 +25,10 @@ Tables (all ``timetable_*`` so an admin's ``\\dt`` shows them as one group):
   already many-to-one in the data (two instructors on ΓΕΝ002, two rooms on
   ΔΟΜ011).
 - ``timetable_changes`` — who did what in an open term.
+- ``timetable_snapshots`` / ``timetable_snapshot_classes`` — named, frozen
+  copies («Επιλογή Α», «Επιλογή Β»…) of the open term, to compare and restore.
+  Save points, not parallel drafts: the term itself stays the one working
+  timetable that every view shows and every form edits.
 
 A class is a **course code**, not a (programme, code) pair. The department
 gave every course new to the 2025 programme a new code and kept the code of
@@ -61,6 +65,8 @@ CLASSES_TABLE = "timetable_classes"
 CLASS_INSTRUCTORS_TABLE = "timetable_class_instructors"
 CLASS_ROOMS_TABLE = "timetable_class_rooms"
 CHANGES_TABLE = "timetable_changes"
+SNAPSHOTS_TABLE = "timetable_snapshots"
+SNAPSHOT_CLASSES_TABLE = "timetable_snapshot_classes"
 
 WINTER = "Χειμερινό"
 SPRING = "Εαρινό"
@@ -84,7 +90,8 @@ MAX_DURATION = 6
 
 ADD, MODIFY, DELETE = "ΠΡΟΣΘΗΚΗ", "ΜΕΤΑΒΟΛΗ", "ΔΙΑΓΡΑΦΗ"
 OPENED, LOCKED_ACTION = "ΑΝΟΙΓΜΑ", "ΚΛΕΙΔΩΜΑ"
-ACTIONS = (ADD, MODIFY, DELETE, OPENED, LOCKED_ACTION)
+SNAPSHOT_ACTION, RESTORED_ACTION = "ΕΚΔΟΧΗ", "ΕΠΑΝΑΦΟΡΑ"
+ACTIONS = (ADD, MODIFY, DELETE, OPENED, LOCKED_ACTION, SNAPSHOT_ACTION, RESTORED_ACTION)
 
 
 def period_for(examino: int) -> str:
@@ -198,6 +205,37 @@ CREATE TABLE IF NOT EXISTS {CHANGES_TABLE} (
 CREATE INDEX IF NOT EXISTS timetable_changes_term_idx
     ON {CHANGES_TABLE} (year, period, created_at DESC);
 
+-- A saved version of an open term. Instructors and rooms are arrays rather
+-- than link tables: a frozen copy is never edited row by row.
+CREATE TABLE IF NOT EXISTS {SNAPSHOTS_TABLE} (
+    id         BIGSERIAL PRIMARY KEY,
+    year       INTEGER NOT NULL,
+    period     TEXT    NOT NULL,
+    name       TEXT    NOT NULL,
+    note       TEXT,
+    created_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (year, period) REFERENCES {TERMS_TABLE}(year, period),
+    UNIQUE (year, period, name)
+);
+
+CREATE TABLE IF NOT EXISTS {SNAPSHOT_CLASSES_TABLE} (
+    snapshot_id     BIGINT    NOT NULL REFERENCES {SNAPSHOTS_TABLE}(id) ON DELETE CASCADE,
+    source_class_id BIGINT    NOT NULL,  -- the working row it was copied from
+    examino         INTEGER   NOT NULL,
+    course_code     TEXT      NOT NULL,
+    section         TEXT      NOT NULL,
+    name_suffix     TEXT,
+    name_curriculum INTEGER,
+    day             INTEGER,
+    start_hour      INTEGER,
+    duration        INTEGER,
+    notes           TEXT,
+    instructor_ids  INTEGER[] NOT NULL DEFAULT ARRAY[]::INTEGER[],  -- in position order
+    room_codes      TEXT[]    NOT NULL DEFAULT ARRAY[]::TEXT[],
+    PRIMARY KEY (snapshot_id, source_class_id)
+);
+
 -- Migrations. Here rather than in db.MIGRATIONS_SQL, which runs before this
 -- schema: on a fresh database the table would not exist yet.
 -- 2026-09-16: a class is a course code; the programme stamp is gone.
@@ -205,6 +243,10 @@ ALTER TABLE {CLASSES_TABLE} DROP COLUMN IF EXISTS curriculum;
 -- 2026-09-23: which programme's title to print, for a code whose programmes
 -- disagree (ΣΥΓ017). NULL is the newest.
 ALTER TABLE {CLASSES_TABLE} ADD COLUMN IF NOT EXISTS name_curriculum INTEGER;
+-- 2026-09-26: the change log learns the snapshot actions.
+ALTER TABLE {CHANGES_TABLE} DROP CONSTRAINT IF EXISTS timetable_changes_action_check;
+ALTER TABLE {CHANGES_TABLE} ADD CONSTRAINT timetable_changes_action_check
+    CHECK (action IN {ACTIONS});
 """
 
 
@@ -367,7 +409,14 @@ def lock_term(year: int, period: str, locked_by: str) -> str:
             ),
             {"status": LOCKED, "by": locked_by, "year": year, "period": period},
         )
-        _log(conn, year, period, None, LOCKED_ACTION, None, locked_by)
+        # Saved versions exist to arrive at this term; once it is locked they
+        # can no longer be restored, so they go with it.
+        dropped = conn.execute(
+            text(f"DELETE FROM {SNAPSHOTS_TABLE} WHERE year = :year AND period = :period"),
+            {"year": year, "period": period},
+        ).rowcount
+        detail = f"Διαγράφηκαν {dropped} εκδοχές" if dropped else None
+        _log(conn, year, period, None, LOCKED_ACTION, detail, locked_by)
     return ""
 
 
@@ -785,6 +834,340 @@ def _describe(course_code, section, day, start_hour, duration) -> str:
     if day is None:
         return f"{course_code} {section}: χωρίς ώρα"
     return f"{course_code} {section}: {DAYS[int(day) - 1]} {int(start_hour):02d}:00 ({int(duration)}h)"
+
+
+# --------------------------------------------------------------------------
+# Εκδοχές — named snapshots of the open term
+# --------------------------------------------------------------------------
+#
+# Save points, not parallel drafts. The term stays the one working timetable;
+# a snapshot freezes it under a name so another arrangement can be tried, and
+# the two compared or the first one restored. Rows remember the working id they
+# came from (source_class_id), which is what lets a comparison say "moved"
+# rather than "removed + added", and lets a restore update rows in place.
+
+SNAPSHOT_FIELDS = (
+    "examino", "course_code", "section", "name_suffix", "name_curriculum",
+    "day", "start_hour", "duration", "notes",
+)
+
+# Every class of a term with its instructors and rooms as arrays — the shape a
+# snapshot row stores. Instructors keep their position order; rooms are sorted,
+# as load_term prints them.
+_TERM_ROWS_SQL = f"""
+SELECT c.id, {", ".join(f"c.{f}" for f in SNAPSHOT_FIELDS)},
+       COALESCE((SELECT array_agg(ci.staff_id ORDER BY ci.position, ci.staff_id)
+                 FROM {CLASS_INSTRUCTORS_TABLE} ci WHERE ci.class_id = c.id),
+                ARRAY[]::INTEGER[]) AS instructor_ids,
+       COALESCE((SELECT array_agg(cr.room_code ORDER BY cr.room_code)
+                 FROM {CLASS_ROOMS_TABLE} cr WHERE cr.class_id = c.id),
+                ARRAY[]::TEXT[]) AS room_codes
+FROM {CLASSES_TABLE} c
+WHERE c.year = :year AND c.period = :period
+"""
+
+# The same columns as _LOAD_TERM_SQL, so shape_term, conflicts, the calendar
+# and the Word export work on a snapshot unchanged. ``id`` is the working row
+# the snapshot row was copied from.
+_LOAD_SNAPSHOT_SQL = f"""
+SELECT c.source_class_id AS id, c.examino, c.course_code, c.section, c.name_suffix, c.name_curriculum,
+       c.day, c.start_hour, c.duration, c.notes,
+       NULL::TEXT AS updated_by, NULL::TIMESTAMPTZ AS updated_at,
+       n.name AS course_name,
+       COALESCE(i.names, '') AS instructors,
+       c.instructor_ids,
+       COALESCE(i.conflict_ids, ARRAY[]::INTEGER[]) AS conflict_ids,
+       c.room_codes,
+       array_to_string(c.room_codes, ' & ') AS room
+FROM {SNAPSHOT_CLASSES_TABLE} c
+LEFT JOIN LATERAL ({NEWEST_NAME_SQL}) n ON TRUE
+LEFT JOIN LATERAL (
+    SELECT string_agg(s.short_name, ', ' ORDER BY u.ord) AS names,
+           array_agg(s.id ORDER BY u.ord) FILTER (WHERE NOT s.placeholder) AS conflict_ids
+    FROM unnest(c.instructor_ids) WITH ORDINALITY AS u(staff_id, ord)
+    JOIN {STAFF_TABLE} s ON s.id = u.staff_id
+) i ON TRUE
+WHERE c.snapshot_id = :snapshot_id
+ORDER BY c.examino, c.course_code, c.section, c.day, c.start_hour
+"""
+
+
+def save_snapshot(year: int, period: str, name: str, note: str | None, author: str) -> str:
+    """Freeze the open term under ``name``. Refuses a locked term or a used name."""
+    engine = db.get_engine()
+    if engine is None:
+        return "Χωρίς βάση δεδομένων."
+    name = (name or "").strip()
+    if not name:
+        return "Δώστε όνομα στην εκδοχή (π.χ. «Επιλογή Α»)."
+    if not is_editable(year, period):
+        return f"Το {term_label(year, period)} δεν είναι ανοιχτό."
+    params = {"year": year, "period": period, "name": name}
+    with engine.begin() as conn:
+        taken = conn.execute(
+            text(
+                f"SELECT 1 FROM {SNAPSHOTS_TABLE} "
+                "WHERE year = :year AND period = :period AND name = :name"
+            ),
+            params,
+        ).first()
+        if taken:
+            return f"Υπάρχει ήδη εκδοχή με το όνομα «{name}»."
+        snapshot_id = conn.execute(
+            text(
+                f"INSERT INTO {SNAPSHOTS_TABLE} (year, period, name, note, created_by) "
+                "VALUES (:year, :period, :name, :note, :author) RETURNING id"
+            ),
+            {**params, "note": (note or "").strip() or None, "author": author},
+        ).scalar_one()
+        columns = ", ".join(SNAPSHOT_FIELDS)
+        count = conn.execute(
+            text(
+                f"INSERT INTO {SNAPSHOT_CLASSES_TABLE} "
+                f"(snapshot_id, source_class_id, {columns}, instructor_ids, room_codes) "
+                f"SELECT :snapshot_id, t.id, {columns}, t.instructor_ids, t.room_codes "
+                f"FROM ({_TERM_ROWS_SQL}) t"
+            ),
+            {**params, "snapshot_id": snapshot_id},
+        ).rowcount
+        _log(conn, year, period, None, SNAPSHOT_ACTION, f"Αποθήκευση «{name}» ({count} γραμμές)", author)
+    return ""
+
+
+def list_snapshots(year: int, period: str) -> pd.DataFrame:
+    """The term's snapshots, oldest first, with their row counts."""
+    columns = ["id", "name", "note", "created_by", "created_at", "row_count"]
+    engine = db.get_engine()
+    if engine is None:
+        return pd.DataFrame(columns=columns)
+    with engine.connect() as conn:
+        return pd.read_sql(
+            text(
+                f"SELECT s.id, s.name, s.note, s.created_by, s.created_at, "
+                f"       count(c.source_class_id) AS row_count "
+                f"FROM {SNAPSHOTS_TABLE} s "
+                f"LEFT JOIN {SNAPSHOT_CLASSES_TABLE} c ON c.snapshot_id = s.id "
+                "WHERE s.year = :year AND s.period = :period "
+                "GROUP BY s.id ORDER BY s.created_at, s.id"
+            ),
+            conn,
+            params={"year": year, "period": period},
+        )
+
+
+def snapshot_state(snapshot_id: int) -> dict | None:
+    engine = db.get_engine()
+    if engine is None:
+        return None
+    with engine.connect() as conn:
+        row = (
+            conn.execute(
+                text(f"SELECT * FROM {SNAPSHOTS_TABLE} WHERE id = :id"), {"id": snapshot_id}
+            )
+            .mappings()
+            .first()
+        )
+    return dict(row) if row else None
+
+
+def load_snapshot(snapshot_id: int) -> pd.DataFrame:
+    """A snapshot in exactly the shape ``load_term`` returns."""
+    state = snapshot_state(snapshot_id)
+    if state is None:
+        return pd.DataFrame()
+    with db.get_engine().connect() as conn:
+        frame = pd.read_sql(text(_LOAD_SNAPSHOT_SQL), conn, params={"snapshot_id": snapshot_id})
+    return shape_term(frame, state["period"])
+
+
+def delete_snapshot(snapshot_id: int, author: str) -> str:
+    engine = db.get_engine()
+    if engine is None:
+        return "Χωρίς βάση δεδομένων."
+    state = snapshot_state(snapshot_id)
+    if state is None:
+        return "Η εκδοχή δεν υπάρχει πια."
+    with engine.begin() as conn:
+        conn.execute(text(f"DELETE FROM {SNAPSHOTS_TABLE} WHERE id = :id"), {"id": snapshot_id})
+        _log(
+            conn, state["year"], state["period"], None, SNAPSHOT_ACTION,
+            f"Διαγραφή «{state['name']}»", author,
+        )
+    return ""
+
+
+def restore_snapshot(snapshot_id: int, author: str) -> str:
+    """Make the working term what the snapshot holds, in one transaction.
+
+    Rows are matched on the working id they were copied from: a row still in
+    the term is updated in place (only if it differs), one deleted since is
+    inserted again — with a new id, which every version of the term then
+    adopts — and a row the snapshot does not have is deleted. So after a
+    restore the version and the term compare as identical, and so do repeated
+    restores.
+    """
+    engine = db.get_engine()
+    if engine is None:
+        return "Χωρίς βάση δεδομένων."
+    state = snapshot_state(snapshot_id)
+    if state is None:
+        return "Η εκδοχή δεν υπάρχει πια."
+    year, period = state["year"], state["period"]
+    if not is_editable(year, period):
+        return f"Το {term_label(year, period)} δεν είναι ανοιχτό."
+
+    columns = ", ".join(SNAPSHOT_FIELDS)
+    updated = inserted = 0
+    with engine.begin() as conn:
+        saved = conn.execute(
+            text(
+                f"SELECT source_class_id, {columns}, instructor_ids, room_codes "
+                f"FROM {SNAPSHOT_CLASSES_TABLE} WHERE snapshot_id = :id"
+            ),
+            {"id": snapshot_id},
+        ).mappings().all()
+        working = {
+            row["id"]: row
+            for row in conn.execute(
+                text(_TERM_ROWS_SQL), {"year": year, "period": period}
+            ).mappings()
+        }
+        keep = set()
+        for row in saved:
+            values = {field: row[field] for field in SNAPSHOT_FIELDS}
+            current = working.get(row["source_class_id"])
+            if current is None:
+                class_id = conn.execute(
+                    text(
+                        f"INSERT INTO {CLASSES_TABLE} "
+                        f"(year, period, {columns}, updated_by) VALUES (:year, :period, "
+                        + ", ".join(f":{f}" for f in SNAPSHOT_FIELDS)
+                        + ", :author) RETURNING id"
+                    ),
+                    {**values, "year": year, "period": period, "author": author},
+                ).scalar_one()
+                _set_links(conn, class_id, list(row["instructor_ids"]), list(row["room_codes"]))
+                # The old id is gone for good (ids are never reused), so every
+                # version of the term that held it now means the new row. Without
+                # this, the version just restored would differ from the term it
+                # produced, and each restore would re-insert the row again.
+                conn.execute(
+                    text(
+                        f"UPDATE {SNAPSHOT_CLASSES_TABLE} SET source_class_id = :new "
+                        "WHERE source_class_id = :old AND snapshot_id IN "
+                        f"(SELECT id FROM {SNAPSHOTS_TABLE} WHERE year = :year AND period = :period)"
+                    ),
+                    {"new": class_id, "old": row["source_class_id"], "year": year, "period": period},
+                )
+                inserted += 1
+                continue
+            keep.add(current["id"])
+            if all(current[f] == values[f] for f in SNAPSHOT_FIELDS) and list(
+                current["instructor_ids"]
+            ) == list(row["instructor_ids"]) and list(current["room_codes"]) == list(row["room_codes"]):
+                continue
+            conn.execute(
+                text(
+                    f"UPDATE {CLASSES_TABLE} SET "
+                    + ", ".join(f"{f} = :{f}" for f in SNAPSHOT_FIELDS)
+                    + ", updated_by = :author, updated_at = now() WHERE id = :id"
+                ),
+                {**values, "id": current["id"], "author": author},
+            )
+            conn.execute(
+                text(f"DELETE FROM {CLASS_INSTRUCTORS_TABLE} WHERE class_id = :id"), {"id": current["id"]}
+            )
+            conn.execute(
+                text(f"DELETE FROM {CLASS_ROOMS_TABLE} WHERE class_id = :id"), {"id": current["id"]}
+            )
+            _set_links(conn, current["id"], list(row["instructor_ids"]), list(row["room_codes"]))
+            updated += 1
+        removed = [class_id for class_id in working if class_id not in keep]
+        if removed:
+            conn.execute(
+                text(f"DELETE FROM {CLASSES_TABLE} WHERE id = ANY(:ids)"), {"ids": removed}
+            )
+        _log(
+            conn, year, period, None, RESTORED_ACTION,
+            f"Επαναφορά «{state['name']}»: {updated} άλλαξαν, {inserted} ξαναπροστέθηκαν, "
+            f"{len(removed)} διαγράφηκαν",
+            author,
+        )
+    return ""
+
+
+def summarize(frame: pd.DataFrame) -> dict:
+    """Rows, unplaced rows and conflicts of a term or a snapshot — what ranks
+    one arrangement against another at a glance. Pure."""
+    if frame.empty:
+        return {"Γραμμές": 0, "Χωρίς ώρα": 0, "Συγκρούσεις": 0}
+    return {
+        "Γραμμές": len(frame),
+        "Χωρίς ώρα": int((~frame["placed"].astype(bool)).sum()),
+        "Συγκρούσεις": len(conflicts(frame)),
+    }
+
+
+def _when(row) -> str:
+    if not row["placed"]:
+        return "χωρίς ώρα"
+    return f"{row['day']} {row['start_time']}–{row['end_time']}"
+
+
+# What a comparison reports on, in this order: label -> how to print it.
+COMPARED_ASPECTS = (
+    ("Ώρα", _when),
+    ("Αίθουσα", lambda row: row["room"] or "—"),
+    ("Διδάσκοντες", lambda row: row["instructors"] or "—"),
+    ("Εξάμηνο", lambda row: str(int(row["examino"]))),
+    ("Τμήμα", lambda row: row["section"]),
+    ("Τίτλος", lambda row: row["course_name"]),  # differs only through name_curriculum
+    ("Ένδειξη", lambda row: row["name_suffix"] or "—"),
+    ("Παρατηρήσεις", lambda row: row["notes"] or "—"),
+)
+ADDED, REMOVED, CHANGED = "Προστέθηκε", "Αφαιρέθηκε", "Άλλαξε"
+
+
+def compare_frames(before: pd.DataFrame, after: pd.DataFrame) -> pd.DataFrame:
+    """What differs between two load_term-shaped frames, matched on ``id``.
+
+    One row per class that was added, removed or changed; for a change, only
+    the aspects that moved, «πριν» and «μετά». Unchanged classes are left out.
+    Pure, so testable without a database.
+    """
+    columns = ["Μεταβολή", "Εξάμηνο", "Μάθημα", "Τι", "Πριν", "Μετά"]
+    old = {int(row["id"]): row for _, row in before.iterrows()}
+    new = {int(row["id"]): row for _, row in after.iterrows()}
+
+    def label(row) -> str:
+        return f"{row['course_code']} {row['section']} · {row['course_name']}"
+
+    def full(row) -> str:
+        return " · ".join(
+            show(row) for name, show in COMPARED_ASPECTS if name in ("Ώρα", "Αίθουσα", "Διδάσκοντες")
+        )
+
+    found = []
+    for class_id in old.keys() | new.keys():
+        a, b = old.get(class_id), new.get(class_id)
+        if a is None:
+            found.append((ADDED, b["examino"], label(b), "", "", full(b), b))
+        elif b is None:
+            found.append((REMOVED, a["examino"], label(a), "", full(a), "", a))
+        else:
+            moved = [(name, show(a), show(b)) for name, show in COMPARED_ASPECTS if show(a) != show(b)]
+            if moved:
+                found.append(
+                    (
+                        CHANGED, b["examino"], label(b),
+                        ", ".join(m[0] for m in moved),
+                        " · ".join(m[1] for m in moved),
+                        " · ".join(m[2] for m in moved),
+                        b,
+                    )
+                )
+    found.sort(key=lambda f: (int(f[1]), f[6]["course_code"], f[6]["section"], f[0]))
+    return pd.DataFrame([(k, int(e), m, t, p, n) for k, e, m, t, p, n, _ in found], columns=columns)
 
 
 # --------------------------------------------------------------------------

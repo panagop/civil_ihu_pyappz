@@ -18,6 +18,7 @@ itself with ``require_ihu_login``; it checks the role where it matters.
 """
 
 import io
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -602,8 +603,171 @@ with tab_prepare:
                         st.success("Διαγράφηκε.")
                         st.rerun()
 
+        @st.fragment
+        def versions_section(current: pd.DataFrame) -> None:
+            """«Εκδοχές»: save points of the open term, to compare and restore.
+
+            A fragment, like «Νέα γραμμή»: switching what is compared should
+            not reload the whole page. Restore and delete rerun the whole app,
+            because the working timetable above changes.
+            """
+            st.markdown("#### Εκδοχές")
+            st.caption(
+                "Αποθηκεύστε το τρέχον πρόγραμμα ως εκδοχή (π.χ. «Επιλογή Α») πριν δοκιμάσετε κάτι άλλο. "
+                "Οι εκδοχές δεν αλλάζουν· συγκρίνονται μεταξύ τους και με το τρέχον, και όποια "
+                "προτιμηθεί επαναφέρεται. Διαγράφονται όταν κλειδωθεί το εξάμηνο."
+            )
+            with st.form("save_snapshot", clear_on_submit=True):
+                c1, c2 = st.columns([1, 2])
+                name = c1.text_input("Όνομα εκδοχής:", placeholder="Επιλογή Α", key="snapshot_name")
+                note = c2.text_input("Σημείωση (προαιρετικά):", key="snapshot_note")
+                if st.form_submit_button("Αποθήκευση ως εκδοχή", icon=":material/bookmark_add:"):
+                    error = tdb.save_snapshot(year, period, name, note, user_email)
+                    if error:
+                        st.error(error)
+                    else:
+                        st.success(f"Αποθηκεύτηκε η εκδοχή «{name.strip()}».")
+
+            # Read after the form, so a version just saved is already listed.
+            snapshots = tdb.list_snapshots(year, period)
+            if snapshots.empty:
+                st.info("Καμία αποθηκευμένη εκδοχή ακόμη.")
+                return
+
+            CURRENT = 0  # snapshot ids start at 1
+            # Plain ints: psycopg cannot adapt the numpy scalars read_sql returns.
+            snapshot_ids = [int(i) for i in snapshots["id"]]
+            names = {CURRENT: "Τρέχον πρόγραμμα", **dict(zip(snapshot_ids, snapshots["name"]))}
+            frames = {CURRENT: current, **{sid: tdb.load_snapshot(sid) for sid in snapshot_ids}}
+            overview = pd.DataFrame(
+                [{"Εκδοχή": names[CURRENT], **tdb.summarize(current), "Σημείωση": "", "Από": "", "Πότε": None}]
+                + [
+                    {
+                        "Εκδοχή": names[sid],
+                        **tdb.summarize(frames[sid]),
+                        "Σημείωση": snap["note"] if pd.notna(snap["note"]) else "",
+                        "Από": snap["created_by"],
+                        "Πότε": snap["created_at"],
+                    }
+                    for sid, (_, snap) in zip(snapshot_ids, snapshots.iterrows())
+                ]
+            )
+            st.dataframe(overview, width="stretch", hide_index=True)
+
+            st.markdown("##### Σύγκριση")
+            options = list(names)
+            c1, c2 = st.columns(2)
+            left = c1.selectbox(
+                "Εκδοχή Α:", options=options, index=1, format_func=names.get, key="compare_left"
+            )
+            right = c2.selectbox(
+                "Εκδοχή Β:", options=options, index=0, format_func=names.get, key="compare_right"
+            )
+            if left == right:
+                st.info("Επιλέξτε δύο διαφορετικές εκδοχές.")
+            else:
+                diff = tdb.compare_frames(frames[left], frames[right])
+                if diff.empty:
+                    st.success(f"Η «{names[left]}» και η «{names[right]}» είναι ίδιες.")
+                else:
+                    st.caption(f"Από «{names[left]}» σε «{names[right]}»: {len(diff)} διαφορές.")
+                    st.dataframe(
+                        diff.rename(columns={"Πριν": names[left], "Μετά": names[right]}),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                compared = sorted(
+                    {int(s) for s in frames[left]["examino"]} | {int(s) for s in frames[right]["examino"]}
+                )
+                if compared:
+                    # Default to the first εξάμηνο with a difference.
+                    changed = sorted({int(e) for e in diff["Εξάμηνο"]}) if not diff.empty else []
+                    semester = st.selectbox(
+                        "Εξάμηνο σπουδών για την εβδομαδιαία προβολή:",
+                        options=compared,
+                        index=compared.index(changed[0]) if changed else 0,
+                        format_func=lambda s: f"Εξάμηνο {s}",
+                        key=f"compare_semester_{left}_{right}",
+                    )
+                    c1, c2 = st.columns(2)
+                    for column, sid, side in ((c1, left, "left"), (c2, right, "right")):
+                        with column:
+                            st.markdown(f"**{names[sid]}**")
+                            frame = frames[sid]
+                            render_week(
+                                frame[frame["examino"] == semester],
+                                f"compare_{year}_{period}_{sid}_{semester}_{side}",
+                                title_with_room,
+                            )
+
+            st.markdown("##### Επαναφορά, διαγραφή, εξαγωγή")
+            target = st.selectbox(
+                "Εκδοχή:", options=snapshot_ids, format_func=names.get, key="snapshot_target"
+            )
+            c1, c2 = st.columns(2)
+            with c1, st.container(border=True):
+                backup = st.checkbox(
+                    "Αποθήκευση του τρέχοντος ως εκδοχή πριν την επαναφορά",
+                    value=True,
+                    key="restore_backup",
+                )
+                confirm_restore = st.checkbox(
+                    f"Το τρέχον πρόγραμμα θα γίνει ίδιο με την «{names[target]}»",
+                    key=f"restore_confirm_{target}",
+                )
+                if st.button(
+                    "Επαναφορά", type="primary", disabled=not confirm_restore,
+                    icon=":material/restore:", key="restore_button",
+                ):
+                    error = ""
+                    if backup:
+                        stamp = datetime.now().strftime("%d/%m %H:%M:%S")  # noqa: DTZ005 - a label
+                        error = tdb.save_snapshot(
+                            year, period, f"Πριν την επαναφορά «{names[target]}» ({stamp})", None, user_email
+                        )
+                    error = error or tdb.restore_snapshot(target, user_email)
+                    if error:
+                        st.error(error)
+                    else:
+                        st.rerun()  # the whole app: the working timetable changed
+            with c2, st.container(border=True):
+                confirm_delete = st.checkbox(
+                    f"Οριστική διαγραφή της «{names[target]}»", key=f"delete_confirm_{target}"
+                )
+                if st.button(
+                    "Διαγραφή εκδοχής", disabled=not confirm_delete,
+                    icon=":material/delete:", key="delete_snapshot_button",
+                ):
+                    error = tdb.delete_snapshot(target, user_email)
+                    if error:
+                        st.error(error)
+                    else:
+                        st.rerun(scope="fragment")
+                export = frames[target][frames[target]["placed"]]
+                if not export.empty:
+                    rooms = tdb.load_rooms()
+                    st.download_button(
+                        "Λήψη Word της εκδοχής",
+                        data=create_weekly_timetable_document(
+                            export, period, tdb.year_label(year),
+                            room_names=dict(zip(rooms["code"], rooms["name"])),
+                        ),
+                        file_name=(
+                            f"Προγραμμα_{period}_{tdb.year_label(year)}_"
+                            f"{re.sub(r'[^\w-]+', '_', names[target]).strip('_')}.docx"
+                        ),
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        icon=":material/download:",
+                        key="snapshot_word",
+                    )
+
+        versions_section(df)
+
         st.markdown("#### Κλείδωμα")
-        st.caption("Μετά το κλείδωμα το εξάμηνο δεν αλλάζει· το επόμενο ανοίγει ως αντίγραφό του.")
+        st.caption(
+            "Μετά το κλείδωμα το εξάμηνο δεν αλλάζει· το επόμενο ανοίγει ως αντίγραφό του. "
+            "Οι αποθηκευμένες εκδοχές διαγράφονται."
+        )
         confirm = st.checkbox(f"Κλείδωμα του {tdb.term_label(year, period)}", key="lock_confirm")
         if st.button("Κλείδωμα", type="primary", disabled=not confirm, key="lock_button"):
             error = tdb.lock_term(year, period, user_email)

@@ -193,6 +193,35 @@ def test_optional_text_columns_are_never_nan():
     assert with_suffix["display_name"].iloc[0] == "A (ΔΥ, ΥΕ)"
 
 
+def test_compare_frames():
+    before = _frame([
+        (1, 1, "A", "Θ", 1, 9, 2, ["301"], [1]),
+        (2, 1, "B", "Θ", 2, 9, 2, ["301"], [2]),
+        (3, 3, "C", "Θ", 3, 9, 2, ["202"], [3]),
+        (4, 3, "D", "Θ", None, None, None, [], []),
+    ])
+    after = _frame([
+        (1, 1, "A", "Θ", 1, 9, 2, ["301"], [1]),         # unchanged
+        (2, 1, "B", "Θ", 4, 11, 2, ["301"], [2]),        # moved
+        (3, 3, "C", "Θ", 3, 9, 2, ["204"], [3, 4]),      # other room, extra instructor
+        (5, 5, "E", "Ε1", 1, 9, 2, ["ΤΣ1"], [5]),        # new
+    ])                                                   # 4 removed
+    diff = tdb.compare_frames(before, after)
+    assert len(diff) == 4
+    by_code = {row["Μάθημα"].split()[0]: row for _, row in diff.iterrows()}
+    assert set(by_code) == {"B", "C", "D", "E"}
+    assert by_code["B"]["Μεταβολή"] == tdb.CHANGED and by_code["B"]["Τι"] == "Ώρα"
+    assert by_code["B"]["Πριν"] == "Τρίτη 09:00–11:00" and by_code["B"]["Μετά"] == "Πέμπτη 11:00–13:00"
+    assert by_code["C"]["Τι"] == "Αίθουσα, Διδάσκοντες"
+    assert by_code["D"]["Μεταβολή"] == tdb.REMOVED and by_code["D"]["Πριν"].startswith("χωρίς ώρα")
+    assert by_code["E"]["Μεταβολή"] == tdb.ADDED and by_code["E"]["Εξάμηνο"] == 5
+    assert diff["Εξάμηνο"].tolist() == sorted(diff["Εξάμηνο"])
+    assert tdb.compare_frames(before, before).empty
+
+    summary = tdb.summarize(before)
+    assert summary == {"Γραμμές": 4, "Χωρίς ώρα": 1, "Συγκρούσεις": 0}
+
+
 def test_streams():
     assert tdb.streams("ΥΥ, ΔΕ") == {"Υ", "Δ"}
     assert tdb.streams(None) == frozenset()
@@ -377,6 +406,134 @@ def test_open_copy_edit_and_lock(database):
     assert set(changes["action"]) >= {tdb.OPENED, tdb.ADD, tdb.MODIFY, tdb.DELETE, tdb.LOCKED_ACTION}
 
 
+COMPARED = ["id", "examino", "course_code", "section", "name_suffix", "day", "start_hour",
+            "duration", "notes", "instructors", "instructor_ids", "room_codes", "room"]
+
+
+def _same(a: pd.DataFrame, b: pd.DataFrame, *, ids: bool = True) -> bool:
+    """Same classes; with ``ids=False`` a re-inserted row may carry a new id."""
+    columns = COMPARED if ids else COMPARED[1:]
+
+    def rows(frame):
+        return sorted(map(str, frame[columns].values.tolist()))
+
+    return rows(a) == rows(b)
+
+
+def test_snapshots_save_compare_restore_and_lock(database):
+    """Runs on a term of its own, opened and locked here, after the flow above
+    has locked its own: only one term may be open at a time."""
+    year, period = 2027, tdb.WINTER
+    assert tdb.open_term(year, period, 2025, tdb.WINTER, "c@ihu.gr") == ""
+    assert "όνομα" in tdb.save_snapshot(year, period, "  ", None, "c@ihu.gr")
+    assert tdb.save_snapshot(year, period, "Επιλογή Α", "όπως πέρυσι", "c@ihu.gr") == ""
+    assert "ήδη" in tdb.save_snapshot(year, period, "Επιλογή Α", None, "c@ihu.gr")
+    assert "ανοιχτό" in tdb.save_snapshot(2025, tdb.WINTER, "Χ", None, "c@ihu.gr")
+
+    snapshots = tdb.list_snapshots(year, period)
+    assert snapshots["name"].tolist() == ["Επιλογή Α"]
+    a_id = int(snapshots["id"].iloc[0])
+    original = tdb.load_term(year, period)
+    assert int(snapshots["row_count"].iloc[0]) == len(original)
+    snapshot_a = tdb.load_snapshot(a_id)
+    assert _same(snapshot_a, original)
+    # The snapshot feeds the same conflict check as the working term.
+    assert len(tdb.conflicts(snapshot_a)) == len(tdb.conflicts(original))
+
+    # Rearrange: move one row, delete one, add one.
+    placed = original[original["placed"]]
+    moved, gone = placed.iloc[0], placed.iloc[1]
+    new_day = 5 if int(moved["day_number"]) != 5 else 4
+    assert tdb.update_class(
+        int(moved["id"]), examino=int(moved["examino"]), section=moved["section"],
+        instructor_ids=list(moved["instructor_ids"]), room_codes=["ΤΣ1"],
+        day=new_day, start_hour=int(moved["start_hour"]), duration=int(moved["duration"]),
+        name_suffix=moved["name_suffix"], notes=moved["notes"], author="c@ihu.gr",
+    ) == ""
+    assert tdb.delete_class(int(gone["id"]), "c@ihu.gr") == ""
+    assert tdb.add_class(
+        year, period, examino=1, course_code="ΓΕΝ001", section="Φ",
+        instructor_ids=[], room_codes=["301"], day=2, start_hour=18, duration=1, author="c@ihu.gr",
+    ) == ""
+    # ΣΥΓ017 taught as the 2018 course: a version keeps the row's title choice.
+    syg = original[(original["course_code"] == "ΣΥΓ017") & (original["section"] == "Θ")].iloc[0]
+    assert tdb.update_class(
+        int(syg["id"]), examino=int(syg["examino"]), section="Θ",
+        instructor_ids=list(syg["instructor_ids"]), room_codes=list(syg["room_codes"]),
+        day=int(syg["day_number"]), start_hour=int(syg["start_hour"]), duration=int(syg["duration"]),
+        name_suffix=syg["name_suffix"], notes=syg["notes"], author="c@ihu.gr", name_curriculum=2018,
+    ) == ""
+    assert tdb.save_snapshot(year, period, "Επιλογή Β", None, "c@ihu.gr") == ""
+    b_id = int(tdb.list_snapshots(year, period)["id"].iloc[-1])
+    snapshot_b = tdb.load_snapshot(b_id)
+    assert snapshot_b[snapshot_b["id"] == syg["id"]].iloc[0]["course_name"] == (
+        "Οργάνωση Εργοταξίου και Δομικές Μηχανές"
+    )
+
+    diff = tdb.compare_frames(tdb.load_snapshot(a_id), snapshot_b)
+    assert sorted(diff["Μεταβολή"]) == sorted([tdb.CHANGED, tdb.CHANGED, tdb.REMOVED, tdb.ADDED])
+    changes = diff[diff["Μεταβολή"] == tdb.CHANGED]
+    changes = changes.set_index(changes["Μάθημα"].str.split().str[0])  # by course code
+    assert changes.loc["ΣΥΓ017", "Τι"] == "Τίτλος"
+    change = changes.loc[moved["course_code"]]
+    assert change["Τι"].startswith("Ώρα") and "Αίθουσα" in change["Τι"]
+
+    # Restoring Α brings the term back. The deleted row returns with a new id,
+    # which Α adopts, so the two compare as identical — not as removed + added.
+    assert tdb.restore_snapshot(a_id, "c@ihu.gr") == ""
+    restored = tdb.load_term(year, period)
+    assert len(restored) == len(original)
+    assert _same(restored, snapshot_a, ids=False)
+    assert restored[restored["id"] == syg["id"]].iloc[0]["course_name"] == (
+        "Προγραμματισμός και Διαχείριση Τεχνικών Έργων"
+    )
+    assert int(gone["id"]) not in set(restored["id"])
+    assert tdb.compare_frames(tdb.load_snapshot(a_id), restored).empty
+    assert _same(tdb.load_snapshot(a_id), restored)
+    # Restoring again changes nothing.
+    assert tdb.restore_snapshot(a_id, "c@ihu.gr") == ""
+    assert tdb.load_term(year, period)["id"].tolist() == restored["id"].tolist()
+
+    assert tdb.delete_snapshot(b_id, "c@ihu.gr") == ""
+    assert tdb.list_snapshots(year, period)["name"].tolist() == ["Επιλογή Α"]
+
+    assert tdb.lock_term(year, period, "c@ihu.gr") == ""
+    assert tdb.list_snapshots(year, period).empty
+    assert "δεν υπάρχει" in tdb.restore_snapshot(a_id, "c@ihu.gr")
+    changes = tdb.term_changes(year, period)
+    assert set(changes["action"]) >= {tdb.SNAPSHOT_ACTION, tdb.RESTORED_ACTION}
+    assert "εκδοχές" in changes["detail"].iloc[0]
+
+
+def test_action_check_accepts_snapshot_actions_after_migration(database):
+    """An installation from before 2026-09-26 has the old CHECK; starting replaces it."""
+    engine = db.get_engine()
+    old = tuple(a for a in tdb.ACTIONS if a not in (tdb.SNAPSHOT_ACTION, tdb.RESTORED_ACTION))
+    with engine.begin() as conn:
+        # Rows the old CHECK would reject, or re-adding it fails.
+        conn.execute(
+            sa_text(f"DELETE FROM {tdb.CHANGES_TABLE} WHERE action = ANY(:new)"),
+            {"new": [tdb.SNAPSHOT_ACTION, tdb.RESTORED_ACTION]},
+        )
+        conn.execute(sa_text(f"ALTER TABLE {tdb.CHANGES_TABLE} DROP CONSTRAINT timetable_changes_action_check"))
+        conn.execute(sa_text(
+            f"ALTER TABLE {tdb.CHANGES_TABLE} ADD CONSTRAINT timetable_changes_action_check "
+            f"CHECK (action IN {old})"
+        ))
+    engine.dispose()
+    db.get_engine.clear()
+    engine = db.get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa_text(f"INSERT INTO {tdb.CHANGES_TABLE} (year, period, action) VALUES (2025, :p, :a)"),
+            {"p": tdb.WINTER, "a": tdb.RESTORED_ACTION},
+        )
+        names = [row[0] for row in conn.execute(sa_text(
+            "SELECT conname FROM pg_constraint WHERE conrelid = CAST(:t AS regclass) AND contype = 'c'"
+        ), {"t": tdb.CHANGES_TABLE})]
+    assert names == ["timetable_changes_action_check"]
+
+
 def test_page_renders(database):
     """The page script runs end to end against the seeded database.
 
@@ -436,3 +593,29 @@ def test_page_toggle_offers_every_semester(database, monkeypatch):
     assert len(widened) > len(default)
     # Winter courses are offered in a spring term once the toggle is on.
     assert any(option.startswith("ΔΟΜ007 ") for option in widened)
+
+
+def test_page_versions_section(database, monkeypatch):
+    """A coordinator on an open term with two versions: the section renders,
+    compares, and switching the comparison does not raise."""
+    import auth
+    from streamlit.testing.v1 import AppTest
+
+    if not tdb.open_terms():
+        assert tdb.open_term(2026, tdb.SPRING, 2025, tdb.SPRING, "c@ihu.gr") == ""
+    year, period = tdb.open_terms()[0]
+    for name in ("Επιλογή Α", "Επιλογή Β"):
+        if name not in set(tdb.list_snapshots(year, period)["name"]):
+            assert tdb.save_snapshot(year, period, name, None, "c@ihu.gr") == ""
+    monkeypatch.setattr(auth, "is_authorized", lambda: True)
+    monkeypatch.setattr(db, "is_coordinator", lambda email: True)
+
+    page = ROOT / "streamlit" / "app_pages" / "8_📅_weekly_timetable.py"
+    app = AppTest.from_file(str(page), default_timeout=300)
+    app.run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+    left = app.selectbox(key="compare_left")
+    assert len(left.options) == 3  # the current timetable and the two versions
+    app.selectbox(key="compare_right").set_value(left.value).run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+    assert any("διαφορετικές" in i.value for i in app.info)
