@@ -110,10 +110,26 @@ Uses `uv` as the package manager.
 
 ```bash
 uv sync           # install all dependencies
-uv sync --extra dev   # include dev tools (pytest, ruff, black)
+uv sync --extra dev   # include dev tools (pytest, ruff, black, jupyter, pixeltable-pgserver)
 ```
 
 Key libraries: `streamlit[auth]` (>=1.42 for OIDC), `httpx` (transitive auth dep), `pandas`, `openpyxl`, `python-docx`, `docxtpl`, `docxcompose`, `streamlit-calendar`, `pydantic`, `sqlalchemy` + `psycopg[binary]` (Postgres), `requests` (the Eudoxus client — it was always pulled in by Streamlit, now declared).
+
+- **Always sync with `--extra dev`.** A plain `uv sync` *removes* the dev
+  tools, including the embedded Postgres the database tests need — and those
+  tests then skip rather than fail.
+- **The VS Code Ruff extension locks `.venv\Scripts\ruff.exe`** while its
+  server runs, so a sync that replaces ruff fails with "Access is denied"
+  (2026-09-26). Set `"ruff.importStrategy": "useBundled"` in the VS Code
+  settings, or disable the extension for the sync. The Python Environments
+  extension may also pop "Error refreshing packages" while `.venv` is being
+  rebuilt; it is transient — the log shows it recovering once the sync ends.
+- **Upgrading dependencies**: `uv lock --upgrade --dry-run` first to see what
+  moves, then `uv lock --upgrade`, `uv sync --extra dev`, and the full test
+  run — it must say **0 skipped**. Push the upgrade as its own commit, apart
+  from code changes, so a regression points at one or the other. Last done
+  2026-09-26 (SQLAlchemy 2.0 → 2.1 and Streamlit 1.63 → 1.64 needed no code
+  change).
 
 ## Secrets / credentials
 
@@ -244,6 +260,19 @@ Railway (workspace "Georgios Panagopoulos's Projects", Hobby plan):
 - Start command runs `scripts/write_secrets_toml.py` first, then Streamlit
 - The container filesystem is **ephemeral**: generated files do not survive a
   restart. Anything to keep must be downloaded and committed to the repo.
+- **A failed build does not take the site down**: Railway keeps serving the
+  previous deployment. «Railpack failed to prepare the build» a couple of
+  seconds after scheduling, with no build log, is a builder-side hiccup
+  (2026-09-26) — redeploy the same deployment before looking for a cause.
+  Nothing the build reads (`pyproject.toml`, `uv.lock`, `runtime.txt`) had
+  changed.
+- **Rolling back** is one click on a previous deployment in Railway (or the
+  MCP `list-deployments`, whose entries say `canRollback`). Code-only changes
+  can always be rolled back this way; a change that migrated the schema cannot
+  be undone by redeploying old code alone.
+- **Risky refactors go on a branch** — only `main` deploys — with an
+  annotated tag on the last good commit first (`pre-restructure` marks the
+  flat-module layout before 2026-09-27).
 
 If OIDC is re-enabled on a host, its `<host>/oauth2callback` must be added to
 the Azure App Registration (Web platform) *and* that host's `redirect_uri` must
@@ -990,6 +1019,13 @@ server. Both files together are 20 KB.
 
 ### Streamlit conventions
 
+The `developing-with-streamlit` skill (installed globally) ships **inside the
+installed Streamlit package**, version-matched:
+`.venv/Lib/site-packages/streamlit/.agents/skills/developing-with-streamlit/`
+(`references/*.md`). For behaviour the docs only hint at, read Streamlit's own
+source in the venv — that is how the `pages/` folder rule under "Navigation"
+was established.
+
 Current Streamlit guidance, worth following in new code:
 
 - **`use_container_width` is deprecated** — use `width="stretch"` (or
@@ -1160,3 +1196,8 @@ These are planned refactors (no functionality changes):
   and the tests load it with `pytest.importorskip` — so a wrong module name does
   not fail, it **silently skips every database test**. After touching it, check
   the run reports no skips.
+- **The repository stores LF** (`text=auto`; the "LF will be replaced by
+  CRLF" warnings are git's normal noise on Windows). Python's
+  `Path.write_text` writes **CRLF** on Windows, so a script that rewrites
+  source files should write bytes (`write_bytes(s.encode())`) or pass
+  `newline="\n"`, or the diff turns into whole-file churn.
