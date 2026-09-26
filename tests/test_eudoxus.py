@@ -219,7 +219,7 @@ def test_export_headers_are_what_the_seed_reads():
 # With a database
 # --------------------------------------------------------------------------
 
-pgserver = pytest.importorskip("pgserver")
+pgserver = pytest.importorskip("pixeltable_pgserver")
 
 
 @pytest.fixture(scope="module")

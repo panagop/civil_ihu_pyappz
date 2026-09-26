@@ -1102,7 +1102,8 @@ These are planned refactors (no functionality changes):
 4. **Add smoke tests** for document generation.
 5. **Move active file paths to a config section** so year updates are a single-line change.
 6. **Local Postgres for development (agreed 2026-09-09, half done).** The
-   tests have one: `pgserver` (dev extra) bundles Postgres binaries and
+   tests have one: `pixeltable-pgserver` (dev extra, imported as
+   `pixeltable_pgserver`) bundles Postgres binaries and
    [tests/test_db_rename.py](tests/test_db_rename.py) starts a throwaway
    instance in a temp directory, so schema changes are no longer a
    push-and-read-the-log affair — copy its `database` fixture for the next
@@ -1115,4 +1116,12 @@ These are planned refactors (no functionality changes):
 ## Notes
 
 - `streamlit/_ooo_exams-schedule_old.py` is an archived previous version of page 3 — kept for reference, not loaded by Streamlit.
-- Python 3.12 required (pinned in pyproject.toml and runtime.txt).
+- Python 3.13 required (since 2026-09-26), pinned in three places that must
+  move together: `requires-python` in pyproject.toml, `runtime.txt` (which
+  Railway's builder reads) and `uv.lock`. Streamlit Cloud ignores all three —
+  its version is chosen in the dashboard.
+- **The tests use `pixeltable-pgserver`, not `pgserver`**: the original stopped
+  at 0.1.4 with no wheels past Python 3.12. The fork imports under another name,
+  and the tests load it with `pytest.importorskip` — so a wrong module name does
+  not fail, it **silently skips every database test**. After touching it, check
+  the run reports no skips.

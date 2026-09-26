@@ -2,7 +2,7 @@
 
 The production database is reachable only from inside Railway, so until now a
 schema change could be checked only by pushing and reading the deployment log.
-``pgserver`` (a dev extra) bundles Postgres binaries and starts one in a temp
+``pixeltable_pgserver`` (a dev extra) bundles Postgres binaries and starts one in a temp
 directory; these tests are skipped where it is not installed.
 
 Two installations are exercised: one built under the pre-2026-09-15 names,
@@ -24,7 +24,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import create_engine, text
 
-pgserver = pytest.importorskip("pgserver")
+pgserver = pytest.importorskip("pixeltable_pgserver")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))

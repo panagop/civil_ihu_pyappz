@@ -232,7 +232,7 @@ def test_streams():
 # With a database
 # --------------------------------------------------------------------------
 
-pgserver = pytest.importorskip("pgserver")
+pgserver = pytest.importorskip("pixeltable_pgserver")
 
 
 @pytest.fixture(scope="module")
