@@ -29,15 +29,16 @@ pgserver = pytest.importorskip("pixeltable_pgserver")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))
 
-import db  # noqa: E402
-import seed_external  # noqa: E402
-from settings import get_secret  # noqa: E402
+from mitroa import data as mdb  # noqa: E402
+from mitroa import seed as seed_external  # noqa: E402
+from shared import database as db  # noqa: E402
+from shared.settings import get_secret  # noqa: E402
 
 # What the tables looked like before the rename is, by construction, the
 # current schema without the prefix — that equivalence is what the rename
 # asserts, so the test builds the legacy installation from it.
-LEGACY_SCHEMA_SQL = db.SCHEMA_SQL.replace(db.TABLE_PREFIX, "")
-LEGACY_MIGRATIONS_SQL = db.MIGRATIONS_SQL.replace(db.TABLE_PREFIX, "")
+LEGACY_SCHEMA_SQL = mdb.SCHEMA_SQL.replace(mdb.TABLE_PREFIX, "")
+LEGACY_MIGRATIONS_SQL = mdb.MIGRATIONS_SQL.replace(mdb.TABLE_PREFIX, "")
 LEGACY_ROWS = {
     "external_electors": [
         (2025, 555, 1, "ΙΔΙΟΥ", "α"),
@@ -46,9 +47,9 @@ LEGACY_ROWS = {
     ],
     "proposals": [
         # (field, elector, action, characterization, reasoning, status)
-        (555, 3, db.ADD, "ΙΔΙΟΥ", "δ", db.ACCEPTED),
-        (555, 2, db.REMOVE, None, None, db.ACCEPTED),
-        (556, 1, db.MODIFY, "ΣΥΝΑΦΟΥΣ", "ε", db.PENDING),
+        (555, 3, mdb.ADD, "ΙΔΙΟΥ", "δ", mdb.ACCEPTED),
+        (555, 2, mdb.REMOVE, None, None, mdb.ACCEPTED),
+        (556, 1, mdb.MODIFY, "ΣΥΝΑΦΟΥΣ", "ε", mdb.PENDING),
     ],
 }
 
@@ -67,7 +68,7 @@ def no_committed_archives(tmp_path, monkeypatch):
     A committed archive makes the app drop the in-database copies on start;
     the tests decide themselves when that should happen.
     """
-    monkeypatch.setattr(db, "BACKUPS_DIR", tmp_path / "db_backups")
+    monkeypatch.setattr(mdb, "BACKUPS_DIR", tmp_path / "db_backups")
     (tmp_path / "db_backups").mkdir()
 
 
@@ -117,7 +118,7 @@ def install_legacy(url: str) -> None:
                 "INSERT INTO year_status (year, status, baseline_year, opened_by) "
                 "VALUES (2026, :open, 2025, 'a@ihu.gr')"
             ),
-            {"open": db.OPEN},
+            {"open": mdb.OPEN},
         )
         conn.execute(
             text(
@@ -128,7 +129,7 @@ def install_legacy(url: str) -> None:
                 "END, CASE WHEN :s = :pending THEN NULL ELSE now() END)"
             ),
             [
-                {"f": f, "e": e, "a": a, "c": c, "r": r, "s": s, "pending": db.PENDING}
+                {"f": f, "e": e, "a": a, "c": c, "r": r, "s": s, "pending": mdb.PENDING}
                 for f, e, a, c, r, s in LEGACY_ROWS["proposals"]
             ],
         )
@@ -162,25 +163,25 @@ def test_legacy_installation_is_renamed_on_start(database, capsys):
     out = capsys.readouterr().out
     assert "Αποτυχία" not in out
     assert "Μετονομάστηκαν πίνακες" in out
-    for old, new in db.LEGACY_TABLES.items():
+    for old, new in mdb.LEGACY_TABLES.items():
         assert f"{old} → {new}" in out
 
     # The tables moved, and a verbatim copy of each was left behind.
-    backups = {db.BACKUP_PREFIX + old for old in db.LEGACY_TABLES}
-    assert set(db.mitroa_tables()) == set(db.LEGACY_TABLES.values()) | backups
+    backups = {mdb.BACKUP_PREFIX + old for old in mdb.LEGACY_TABLES}
+    assert set(mdb.mitroa_tables()) == set(mdb.LEGACY_TABLES.values()) | backups
     with engine.connect() as conn:
-        for old, new in db.LEGACY_TABLES.items():
+        for old, new in mdb.LEGACY_TABLES.items():
             assert conn.execute(text(f"SELECT to_regclass('{old}')")).scalar() is None
             live = conn.execute(text(f"SELECT count(*) FROM {new}")).scalar()
             copy = conn.execute(
-                text(f"SELECT count(*) FROM {db.BACKUP_PREFIX}{old}")
+                text(f"SELECT count(*) FROM {mdb.BACKUP_PREFIX}{old}")
             ).scalar()
             assert live == copy
 
     # Nothing in the catalogue still carries an old name: the μητρώα objects
     # are all mitroa_*, and the only mitroa_* objects are those.
     names = catalogue_names(engine)
-    legacy_prefixes = tuple(f"{old}_" for old in db.LEGACY_TABLES)
+    legacy_prefixes = tuple(f"{old}_" for old in mdb.LEGACY_TABLES)
     assert not [n for n in names if n.startswith(legacy_prefixes)]
     assert {
         "mitroa_external_electors_pkey",
@@ -204,17 +205,17 @@ def test_legacy_installation_is_renamed_on_start(database, capsys):
     assert owner == "public.mitroa_proposals_id_seq"
 
     # The rows came through, and the module reads them under the new names.
-    assert db.stored_years() == [2025]
-    assert len(db.load_external_electors(2025)) == 3
-    assert db.year_state(2026)["baseline_year"] == 2025
-    proposals = db.list_proposals(2026)
+    assert mdb.stored_years() == [2025]
+    assert len(mdb.load_external_electors(2025)) == 3
+    assert mdb.year_state(2026)["baseline_year"] == 2025
+    proposals = mdb.list_proposals(2026)
     assert sorted(proposals["id"]) == [1, 2, 3]
 
-    working = db.working_electors(2026)
+    working = mdb.working_electors(2026)
     assert set(zip(working["field_code"], working["elector_id"])) == {
         (555, 1), (555, 3), (556, 1)
     }
-    projected = db.working_electors(2026, include_pending=True)
+    projected = mdb.working_electors(2026, include_pending=True)
     row = projected[(projected["field_code"] == 556) & (projected["elector_id"] == 1)]
     assert row["characterization"].iat[0] == "ΣΥΝΑΦΟΥΣ"
 
@@ -225,36 +226,36 @@ def test_writes_after_the_rename(database, capsys):
     capsys.readouterr()
 
     # The sequence kept its position: the next id follows the three old rows.
-    assert db.add_proposal(
-        2026, 556, 2, db.ADD, "νέος", "y@ihu.gr", "ΙΔΙΟΥ", "στ"
+    assert mdb.add_proposal(
+        2026, 556, 2, mdb.ADD, "νέος", "y@ihu.gr", "ΙΔΙΟΥ", "στ"
     ) == "Η πρόταση καταχωρήθηκε."
-    assert sorted(db.list_proposals(2026)["id"]) == [1, 2, 3, 4]
+    assert sorted(mdb.list_proposals(2026)["id"]) == [1, 2, 3, 4]
 
     # A rejected write names the renamed constraint, so a future traceback
     # points at the right object.
-    message = db.add_proposal(2026, 556, 2, "ΛΑΘΟΣ", "x", "y@ihu.gr", "ΙΔΙΟΥ", "z")
+    message = mdb.add_proposal(2026, 556, 2, "ΛΑΘΟΣ", "x", "y@ihu.gr", "ΙΔΙΟΥ", "z")
     assert "απορρίφθηκε" in message
     assert "mitroa_proposals_action_check" in capsys.readouterr().out
 
-    assert db.withdraw_proposal(4, "y@ihu.gr") == "Η πρόταση αποσύρθηκε."
-    assert db.decide_proposal(3, db.ACCEPTED, "c@ihu.gr").endswith(
-        db.ACCEPTED.lower() + "."
+    assert mdb.withdraw_proposal(4, "y@ihu.gr") == "Η πρόταση αποσύρθηκε."
+    assert mdb.decide_proposal(3, mdb.ACCEPTED, "c@ihu.gr").endswith(
+        mdb.ACCEPTED.lower() + "."
     )
-    assert db.pending_by_field(2026).empty
+    assert mdb.pending_by_field(2026).empty
 
     # Finalisation writes into the renamed table and locks the renamed year.
-    message = db.finalize_year(2026, "c@ihu.gr", blocked_ids={3})
+    message = mdb.finalize_year(2026, "c@ihu.gr", blocked_ids={3})
     assert "οριστικοποιήθηκε με 2 εγγραφές" in message
-    assert db.stored_years() == [2026, 2025]
-    assert db.year_state(2026)["status"] == db.LOCKED
-    stored = db.load_external_electors(2026).set_index(["field_code", "elector_id"])
+    assert mdb.stored_years() == [2026, 2025]
+    assert mdb.year_state(2026)["status"] == mdb.LOCKED
+    stored = mdb.load_external_electors(2026).set_index(["field_code", "elector_id"])
     assert stored.loc[(556, 1), "characterization"] == "ΣΥΝΑΦΟΥΣ"
 
 
 def test_second_start_is_a_no_op(database, capsys):
     install_legacy(database)
     db.get_engine()
-    before = db.mitroa_tables()
+    before = mdb.mitroa_tables()
     capsys.readouterr()
 
     db.get_engine.clear()
@@ -262,23 +263,23 @@ def test_second_start_is_a_no_op(database, capsys):
     out = capsys.readouterr().out
     assert "Αποτυχία" not in out
     assert "Μετονομάστηκαν" not in out
-    assert db.mitroa_tables() == before
+    assert mdb.mitroa_tables() == before
 
 
 def test_copies_are_dropped_once_their_archive_is_committed(database, capsys):
     install_legacy(database)
     db.get_engine()
-    copies = [name for name in db.mitroa_tables() if name.startswith(db.BACKUP_PREFIX)]
+    copies = [name for name in mdb.mitroa_tables() if name.startswith(mdb.BACKUP_PREFIX)]
     assert len(copies) == 3
 
     # An archive from before the copies were taken does not cover them.
-    (db.BACKUPS_DIR / "mitroa_db_20260101-0900.zip").write_bytes(b"")
+    (mdb.BACKUPS_DIR / "mitroa_db_20260101-0900.zip").write_bytes(b"")
     db.get_engine.clear()
     db.get_engine()
-    assert [n for n in db.mitroa_tables() if n.startswith(db.BACKUP_PREFIX)] == copies
+    assert [n for n in mdb.mitroa_tables() if n.startswith(mdb.BACKUP_PREFIX)] == copies
 
     # One from that day or later does, and the copies go — with a log line.
-    (db.BACKUPS_DIR / "mitroa_db_20260915-1343.zip").write_bytes(b"")
+    (mdb.BACKUPS_DIR / "mitroa_db_20260915-1343.zip").write_bytes(b"")
     db.get_engine.clear()
     capsys.readouterr()
     db.get_engine()
@@ -286,25 +287,25 @@ def test_copies_are_dropped_once_their_archive_is_committed(database, capsys):
     assert "Διαγράφηκαν αντίγραφα" in out
     assert all(name in out for name in copies)
     assert "Αποτυχία" not in out
-    assert db.mitroa_tables() == sorted(db.LEGACY_TABLES.values())
+    assert mdb.mitroa_tables() == sorted(mdb.LEGACY_TABLES.values())
     # The live tables were not touched.
-    assert db.stored_years() == [2025]
-    assert sorted(db.list_proposals(2026)["id"]) == [1, 2, 3]
+    assert mdb.stored_years() == [2025]
+    assert sorted(mdb.list_proposals(2026)["id"]) == [1, 2, 3]
 
 
 def test_backup_archive_holds_every_table(database):
     install_legacy(database)
     db.get_engine()
 
-    filename, payload = db.backup_archive()
+    filename, payload = mdb.backup_archive()
     assert re.fullmatch(r"mitroa_db_\d{8}-\d{4}\.zip", filename)
     with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert set(archive.namelist()) == {f"{t}.csv" for t in db.mitroa_tables()}
+        assert set(archive.namelist()) == {f"{t}.csv" for t in mdb.mitroa_tables()}
         live = archive.read("mitroa_external_electors.csv")
         assert live.startswith("﻿".encode("utf-8"))
         assert len(pd.read_csv(BytesIO(live))) == 3
         copy = pd.read_csv(BytesIO(archive.read(
-            f"{db.BACKUP_PREFIX}proposals.csv"
+            f"{mdb.BACKUP_PREFIX}proposals.csv"
         )))
         assert list(copy["id"]) == [1, 2, 3]
 
@@ -314,19 +315,19 @@ def test_fresh_installation_uses_the_new_names(database, capsys):
     out = capsys.readouterr().out
     assert "Αποτυχία" not in out
     assert "Μετονομάστηκαν" not in out
-    assert db.mitroa_tables() == sorted(db.LEGACY_TABLES.values())
+    assert mdb.mitroa_tables() == sorted(mdb.LEGACY_TABLES.values())
 
     # The seeder writes into the renamed table, and skips it the second time.
     assert "φορτώθηκαν: 2025 (1476 εγγραφές)" in seed_external.seed_historical_years(
         engine
     )
     assert "υπήρχαν ήδη: 2025" in seed_external.seed_historical_years(engine)
-    assert db.stored_years() == [2025]
+    assert mdb.stored_years() == [2025]
 
     # The full production start path, including the other two schemas, and
     # the log line that is the only way to confirm a change landed on Railway.
     status = db.bootstrap()
     assert "Σφάλμα" not in status
     tables = status.split("πίνακες: ")[1].split(", ")
-    assert set(db.LEGACY_TABLES.values()) <= set(tables)
-    assert not (set(db.LEGACY_TABLES) & set(tables))
+    assert set(mdb.LEGACY_TABLES.values()) <= set(tables)
+    assert not (set(mdb.LEGACY_TABLES) & set(tables))

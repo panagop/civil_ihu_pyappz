@@ -22,9 +22,8 @@ import json
 from datetime import datetime
 
 import pandas as pd
+from shared import database as db
 from sqlalchemy import text
-
-import db
 
 COURSES_TABLE = "perigrammata_courses"
 REVISIONS_TABLE = "perigrammata_revisions"

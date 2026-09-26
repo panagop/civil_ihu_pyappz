@@ -2,12 +2,12 @@
 from pathlib import Path
 
 import pandas as pd
-import streamlit as st
 from streamlit_calendar import calendar
-
 from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS
 from utils.exams_data import default_period_index, discover_exam_periods, load_data
 from utils.exams_export import create_weekly_calendar_document
+
+import streamlit as st
 
 st.set_page_config(
     layout="wide",
@@ -15,7 +15,7 @@ st.set_page_config(
     page_icon="🗓️",
 )
 
-from branding import apply_branding  # noqa: E402
+from shared.branding import apply_branding  # noqa: E402
 
 apply_branding()
 

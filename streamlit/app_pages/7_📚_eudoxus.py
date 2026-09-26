@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
 import streamlit as st
 
 st.set_page_config(
@@ -22,12 +23,12 @@ st.set_page_config(
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import db  # noqa: E402
-import eudoxus_db as edb  # noqa: E402
-from auth import require_ihu_login  # noqa: E402
-from branding import apply_branding  # noqa: E402
-from eudoxus_client import Eudoxus  # noqa: E402
-from seed_eudoxus import seed_eudoxus  # noqa: E402
+from eudoxus import data as edb  # noqa: E402
+from eudoxus.client import Eudoxus  # noqa: E402
+from eudoxus.seed import seed_eudoxus  # noqa: E402
+from shared import database as db  # noqa: E402
+from shared.auth import is_coordinator, require_ihu_login  # noqa: E402
+from shared.branding import apply_branding  # noqa: E402
 
 require_ihu_login()
 apply_branding()
@@ -50,7 +51,7 @@ if not years:
     st.stop()
 
 user_email = getattr(st.user, "email", "") or ""
-coordinator = db.is_coordinator(user_email)
+coordinator = is_coordinator(user_email)
 open_year_list = edb.open_years()
 working_year = open_year_list[0] if open_year_list else None
 

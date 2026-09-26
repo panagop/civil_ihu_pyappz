@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import Engine, text
 
-from perigrammata_db import (
+from perigrammata.data import (
     CONTENT_COLUMNS,
     COURSES_TABLE,
     INTEGER_COLUMNS,
@@ -27,7 +27,7 @@ from perigrammata_db import (
     REVISIONS_TABLE,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_DIR = ROOT / "files" / "perigrammata"
 FILENAME_RE = re.compile(r"perigrammata_(gr|eng)_(\d{4})$")
 

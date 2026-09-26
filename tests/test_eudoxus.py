@@ -20,11 +20,11 @@ from sqlalchemy import text as sa_text
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))
 
-import eudoxus_db as edb  # noqa: E402
-import seed_eudoxus as seed  # noqa: E402
-import db  # noqa: E402
-from eudoxus_client import availability_reason  # noqa: E402
-from settings import get_secret  # noqa: E402
+from eudoxus import data as edb  # noqa: E402
+from eudoxus import seed  # noqa: E402
+from eudoxus.client import availability_reason  # noqa: E402
+from shared import database as db  # noqa: E402
+from shared.settings import get_secret  # noqa: E402
 
 WORKBOOK = seed.EUDOXUS_DIR / "eudoxus_books_2025-26.xlsx"
 CSV_EXPORT = seed.EUDOXUS_DIR / "Συγγράμματα ΕΥΔΟΞΟΣ 2026-2027.csv"

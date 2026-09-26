@@ -17,7 +17,7 @@ from pathlib import Path
 
 import streamlit as st
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LOGO_DIR = ROOT / "files" / "logos"
 DEPARTMENT_LOGO = LOGO_DIR / "civil_ihu_logo.png"
 UNIVERSITY_LOGO = LOGO_DIR / "ihu_logo.png"

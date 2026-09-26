@@ -14,23 +14,25 @@ from __future__ import annotations
 import io
 
 import pandas as pd
-import streamlit as st
+from shared import auth
+from shared import database as db
 
-import db
-import external_table
-from external_report import build_report
+import streamlit as st
+from mitroa import data as mdb
+from mitroa import table as external_table
+from mitroa.report import build_report
 
 ID_COL = "Κωδικός Χρήστη"
 
 ACTION_LABELS = {
-    db.MODIFY: "Μεταβολή χαρακτηρισμού / αιτιολόγησης",
-    db.REMOVE: "Αφαίρεση εκλέκτορα",
-    db.RECHARACTERIZE: "Αλλαγή χαρακτηρισμού",
-    db.REJUSTIFY: "Διόρθωση αιτιολόγησης",
+    mdb.MODIFY: "Μεταβολή χαρακτηρισμού / αιτιολόγησης",
+    mdb.REMOVE: "Αφαίρεση εκλέκτορα",
+    mdb.RECHARACTERIZE: "Αλλαγή χαρακτηρισμού",
+    mdb.REJUSTIFY: "Διόρθωση αιτιολόγησης",
 }
 PROPOSAL_MARKS = {
-    db.ADD: "➕", db.REMOVE: "➖", db.MODIFY: "🔄",
-    db.RECHARACTERIZE: "🔄", db.REJUSTIFY: "✏️",
+    mdb.ADD: "➕", mdb.REMOVE: "➖", mdb.MODIFY: "🔄",
+    mdb.RECHARACTERIZE: "🔄", mdb.REJUSTIFY: "✏️",
 }
 
 BLOCKED_MARK = "🔴"
@@ -179,7 +181,7 @@ def _open_year_block(year: int, baseline_year: int, user_email: str, coordinator
         f"ο πίνακας του {baseline_year} συν τις εγκεκριμένες προτάσεις."
     )
     if st.button(f"Άνοιγμα έτους {year} με βάση το {baseline_year}", type="primary"):
-        st.success(db.open_year(year, baseline_year, user_email))
+        st.success(mdb.open_year(year, baseline_year, user_email))
         st.rerun()
 
 
@@ -201,20 +203,20 @@ def _propose_change(year: int, field_code: int, table: pd.DataFrame,
     elector = int(current.elector_id)
 
     action = st.radio(
-        "Ενέργεια", [db.MODIFY, db.REMOVE], horizontal=True,
+        "Ενέργεια", [mdb.MODIFY, mdb.REMOVE], horizontal=True,
         format_func=ACTION_LABELS.get, key=f"chg_action_{field_code}",
     )
 
     characterization = None
-    if action == db.MODIFY:
+    if action == mdb.MODIFY:
         st.caption(
             "Αλλάξτε τον χαρακτηρισμό, την αιτιολόγηση ή και τα δύο. "
             "Καταχωρείται ως μία πρόταση, ώστε να εγκριθεί ενιαία."
         )
         # Also outside the form: the suggested reasons below depend on it.
         characterization = st.radio(
-            "Χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True,
-            index=db.CHARACTERIZATIONS.index(current.characterization),
+            "Χαρακτηρισμός", mdb.CHARACTERIZATIONS, horizontal=True,
+            index=mdb.CHARACTERIZATIONS.index(current.characterization),
             key=f"chg_char_{field_code}_{elector}",
         )
         suggestions = ["Ενημέρωση της αιτιολόγησης συνάφειας"]
@@ -236,7 +238,7 @@ def _propose_change(year: int, field_code: int, table: pd.DataFrame,
     # widget whose key is unchanged, which would defeat the new defaults.
     with st.form(f"change_{field_code}_{elector}_{action}"):
         reasoning = None
-        if action == db.MODIFY:
+        if action == mdb.MODIFY:
             reasoning = st.text_area(
                 "Αιτιολόγηση συνάφειας", value=current.reasoning, height=140,
                 key=f"chg_reason_{field_code}_{elector}",
@@ -249,14 +251,14 @@ def _propose_change(year: int, field_code: int, table: pd.DataFrame,
         )
 
         if st.form_submit_button("Καταχώρηση πρότασης"):
-            unchanged = action == db.MODIFY and (
+            unchanged = action == mdb.MODIFY and (
                 characterization == current.characterization
                 and (reasoning or "").strip() == (current.reasoning or "").strip()
             )
             if unchanged:
                 st.error("Δεν αλλάξατε τίποτα.")
                 return
-            message = db.add_proposal(
+            message = mdb.add_proposal(
                 year=year,
                 field_code=field_code,
                 elector_id=elector,
@@ -307,7 +309,7 @@ def _propose_addition(year: int, field_code: int, registry: pd.DataFrame,
 
     with st.form(f"add_{field_code}_{options[label]}"):
         characterization = st.radio(
-            "Χαρακτηρισμός", db.CHARACTERIZATIONS, horizontal=True
+            "Χαρακτηρισμός", mdb.CHARACTERIZATIONS, horizontal=True
         )
         reasoning = st.text_area(
             "Αιτιολόγηση συνάφειας *",
@@ -322,9 +324,9 @@ def _propose_addition(year: int, field_code: int, registry: pd.DataFrame,
             if not reasoning.strip():
                 st.error("Η αιτιολόγηση συνάφειας είναι υποχρεωτική.")
             else:
-                message = db.add_proposal(
+                message = mdb.add_proposal(
                     year=year, field_code=field_code, elector_id=options[label],
-                    action=db.ADD, note=note, author=user_email,
+                    action=mdb.ADD, note=note, author=user_email,
                     characterization=characterization, reasoning=reasoning.strip(),
                 )
                 if message.startswith("Η πρόταση καταχωρήθηκε"):
@@ -335,7 +337,7 @@ def _propose_addition(year: int, field_code: int, registry: pd.DataFrame,
 
 
 def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
-    mine = db.list_proposals(year)
+    mine = mdb.list_proposals(year)
     if not mine.empty:
         mine = mine[mine["author"] == user_email]
     if mine.empty:
@@ -349,7 +351,7 @@ def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
     )[["id", "field_code", "Εκλέκτορας", "action", "status", "note", "created_at"]]
     st.dataframe(view, width="stretch", hide_index=True)
 
-    pending = mine[mine["status"] == db.PENDING]
+    pending = mine[mine["status"] == mdb.PENDING]
     if pending.empty:
         return
     with st.form("withdraw"):
@@ -361,7 +363,7 @@ def _my_proposals(year: int, user_email: str, registry_by_id: dict) -> None:
             ),
         )
         if st.form_submit_button("Απόσυρση"):
-            st.info(db.withdraw_proposal(int(choice), user_email))
+            st.info(mdb.withdraw_proposal(int(choice), user_email))
             st.rerun()
 
 
@@ -380,7 +382,7 @@ def _preview_block(year: int, field_code: int, current: pd.DataFrame,
     Shaped by external_table, so it has the submitted layout — the same columns
     the browse tab shows and the Word report prints.
     """
-    projected_all = db.working_electors(
+    projected_all = mdb.working_electors(
         year, include_pending=True, blocked_ids=blocked
     )
     projected = (
@@ -481,16 +483,16 @@ ADDITIONS_COLUMNS = [
 def _addition_meta(year: int) -> dict[tuple[int, int], dict]:
     """Per (subject, elector), the ΠΡΟΣΘΗΚΗ proposal that put them there.
 
-    Replayed in the same order as :func:`db.working_electors`, so where an
+    Replayed in the same order as :func:`mdb.working_electors`, so where an
     elector was added more than once the surviving proposal is the one whose
     values the table actually shows.
     """
-    proposals = db.list_proposals(year)
+    proposals = mdb.list_proposals(year)
     if proposals.empty:
         return {}
     proposals = proposals[
-        (proposals["action"] == db.ADD)
-        & proposals["status"].isin([db.ACCEPTED, db.PENDING])
+        (proposals["action"] == mdb.ADD)
+        & proposals["status"].isin([mdb.ACCEPTED, mdb.PENDING])
     ]
     return {
         (int(row.field_code), int(row.elector_id)): {
@@ -580,7 +582,7 @@ def _additions_block(year: int, baseline_year: int, projected_all: pd.DataFrame,
     view = frame[[name for name in ADDITIONS_COLUMNS if name in frame.columns]].fillna("")
 
     pending_count = int(
-        (view[PROPOSAL_STATUS_COL] == db.PENDING).sum()
+        (view[PROPOSAL_STATUS_COL] == mdb.PENDING).sum()
     ) if PROPOSAL_STATUS_COL in view.columns else 0
     counts = view[external_table.CHARAKTIRISMOS_COL].value_counts()
     col_a, col_b, col_c, col_d = st.columns(4)
@@ -596,7 +598,7 @@ def _additions_block(year: int, baseline_year: int, projected_all: pd.DataFrame,
         disabled=not pending_count,
         help="Οι προσθήκες που δεν έχει εγκρίνει ακόμη ο συντονιστής.",
     )
-    shown = view[view[PROPOSAL_STATUS_COL] == db.PENDING] if only_pending else view
+    shown = view[view[PROPOSAL_STATUS_COL] == mdb.PENDING] if only_pending else view
 
     st.dataframe(shown, width="stretch", hide_index=True)
     if pending_count:
@@ -614,8 +616,8 @@ def _additions_block(year: int, baseline_year: int, projected_all: pd.DataFrame,
 
 
 # The order changes read in, within a subject
-ENTRY_ORDER = [db.REMOVE, db.ADD, db.MODIFY, db.RECHARACTERIZE, db.REJUSTIFY,
-               db.REGISTRY_UPDATE]
+ENTRY_ORDER = [mdb.REMOVE, mdb.ADD, mdb.MODIFY, mdb.RECHARACTERIZE, mdb.REJUSTIFY,
+               mdb.REGISTRY_UPDATE]
 
 
 def _change_entries(
@@ -645,11 +647,11 @@ def _change_entries(
     for row in auto_removed.itertuples(index=False):
         entries.setdefault(str(int(row.field_code)), []).append(
             {
-                "action": db.REMOVE,
+                "action": mdb.REMOVE,
                 "person": _person_label(registry_by_id, int(row.elector_id)),
                 "detail": "Αφαιρείται",
-                "note": db.AUTO_REMOVAL_NOTE,
-                "status": db.AUTO_STATUS,
+                "note": mdb.AUTO_REMOVAL_NOTE,
+                "status": mdb.AUTO_STATUS,
             }
         )
 
@@ -661,18 +663,18 @@ def _change_entries(
                 continue
             entries.setdefault(str(int(row.field_code)), []).append(
                 {
-                    "action": db.REGISTRY_UPDATE,
+                    "action": mdb.REGISTRY_UPDATE,
                     "person": _person_label(registry_by_id, elector),
                     "detail": registry_moves[elector],
-                    "note": db.REGISTRY_UPDATE_NOTE,
-                    "status": db.AUTO_STATUS,
+                    "note": mdb.REGISTRY_UPDATE_NOTE,
+                    "status": mdb.AUTO_STATUS,
                 }
             )
 
-    proposals = db.list_proposals(year)
+    proposals = mdb.list_proposals(year)
     if proposals.empty:
         return _ordered(entries)
-    proposals = proposals[proposals["status"].isin([db.ACCEPTED, db.PENDING])]
+    proposals = proposals[proposals["status"].isin([mdb.ACCEPTED, mdb.PENDING])]
 
     # What each elector's characterisation was before the proposals ran
     held = (
@@ -686,10 +688,10 @@ def _change_entries(
 
     for row in proposals.itertuples(index=False):
         key = (int(row.field_code), int(row.elector_id))
-        if row.action == db.ADD:
+        if row.action == mdb.ADD:
             detail = f"Προστίθεται ως {row.characterization}"
             held[key] = row.characterization
-        elif row.action == db.REMOVE:
+        elif row.action == mdb.REMOVE:
             detail = "Αφαιρείται"
         else:
             before = held.get(key)
@@ -782,7 +784,7 @@ def _backup_block() -> None:
     when a backup is wanted.
     """
     with st.expander("Αντίγραφο ασφαλείας της βάσης (CSV)"):
-        tables = db.mitroa_tables()
+        tables = mdb.mitroa_tables()
         st.caption(
             "Όλοι οι πίνακες `mitroa_*` ως αρχεία CSV σε ένα zip: "
             + ", ".join(f"`{name}`" for name in tables)
@@ -790,7 +792,7 @@ def _backup_block() -> None:
             "καταχωρίστε το στο αποθετήριο (`files/mitroa/db_backups/`)."
         )
         if st.button("Δημιουργία αντιγράφου", key="backup_build"):
-            st.session_state["backup_file"] = db.backup_archive()
+            st.session_state["backup_file"] = mdb.backup_archive()
         if "backup_file" in st.session_state:
             filename, data = st.session_state["backup_file"]
             st.download_button(
@@ -801,7 +803,7 @@ def _backup_block() -> None:
 
 def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -> None:
     """Decide every pending proposal of the subject on screen, in one go."""
-    here = db.list_proposals(year, field_code=field_code, status=db.PENDING)
+    here = mdb.list_proposals(year, field_code=field_code, status=mdb.PENDING)
     if here.empty:
         st.caption("Καμία εκκρεμής πρόταση σε αυτό το αντικείμενο.")
         return
@@ -823,24 +825,24 @@ def _bulk_block(year: int, field_code: int, field_label: str, user_email: str) -
         "Έγκριση όλων", type="primary", disabled=not confirmed,
         key=f"bulk_yes_{field_code}",
     ):
-        st.success(db.decide_field_proposals(
-            year, field_code, db.ACCEPTED, user_email, note))
+        st.success(mdb.decide_field_proposals(
+            year, field_code, mdb.ACCEPTED, user_email, note))
         st.rerun()
     if reject.button(
         "Απόρριψη όλων", disabled=not confirmed, key=f"bulk_no_{field_code}"
     ):
-        st.warning(db.decide_field_proposals(
-            year, field_code, db.REJECTED, user_email, note))
+        st.warning(mdb.decide_field_proposals(
+            year, field_code, mdb.REJECTED, user_email, note))
         st.rerun()
 
 
 def _coordinator_block(year: int, field_code: int, field_label: str,
                        registry_by_id: dict, user_email: str,
                        blocked: set[int]) -> None:
-    pending = db.list_proposals(year, status=db.PENDING)
+    pending = mdb.list_proposals(year, status=mdb.PENDING)
     st.metric("Εκκρεμείς προτάσεις (όλο το έτος)", len(pending))
 
-    per_field = db.pending_by_field(year)
+    per_field = mdb.pending_by_field(year)
     if not per_field.empty:
         with st.expander(
             f"Εκκρεμότητες ανά αντικείμενο ({len(per_field)} αντικείμενα)"
@@ -876,12 +878,12 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
             decision_note = st.text_input("Σχόλιο απόφασης (προαιρετικό)")
             accept, reject = st.columns(2)
             if accept.form_submit_button("Έγκριση", type="primary"):
-                st.success(db.decide_proposal(
-                    int(choice), db.ACCEPTED, user_email, decision_note))
+                st.success(mdb.decide_proposal(
+                    int(choice), mdb.ACCEPTED, user_email, decision_note))
                 st.rerun()
             if reject.form_submit_button("Απόρριψη"):
-                st.warning(db.decide_proposal(
-                    int(choice), db.REJECTED, user_email, decision_note))
+                st.warning(mdb.decide_proposal(
+                    int(choice), mdb.REJECTED, user_email, decision_note))
                 st.rerun()
 
     st.divider()
@@ -893,7 +895,7 @@ def _coordinator_block(year: int, field_code: int, field_label: str,
     )
     confirmed = st.checkbox(f"Επιβεβαιώνω την οριστικοποίηση του {year}")
     if st.button("Οριστικοποίηση έτους", disabled=not confirmed):
-        message = db.finalize_year(year, user_email, blocked)
+        message = mdb.finalize_year(year, user_email, blocked)
         (st.success if "οριστικοποιήθηκε" in message else st.error)(message)
         if "οριστικοποιήθηκε" in message:
             st.rerun()
@@ -910,13 +912,13 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         )
         return
 
-    coordinator = db.is_coordinator(user_email)
-    state = db.year_state(year)
+    coordinator = auth.is_coordinator(user_email)
+    state = mdb.year_state(year)
     if state is None:
         _open_year_block(year, baseline_year, user_email, coordinator)
         return
 
-    locked = state["status"] == db.LOCKED
+    locked = state["status"] == mdb.LOCKED
     if locked:
         st.success(
             f"Το έτος {year} είναι **κλειδωμένο** "
@@ -944,9 +946,9 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
     # `table_all` keeps them, only so the overview below can still show them
     # marked 🔴: seeing who dropped out, in place, is what makes the table
     # readable at a glance.
-    table = db.working_electors(year, blocked_ids=blocked)
-    table_all = db.working_electors(year)
-    auto_removed = db.auto_removals(year, blocked)
+    table = mdb.working_electors(year, blocked_ids=blocked)
+    table_all = mdb.working_electors(year)
+    auto_removed = mdb.auto_removals(year, blocked)
     labels = {
         f"{row.Code} — {row.field}": int(row.Code)
         for row in antikeimena.sort_values("Code").itertuples(index=False)
@@ -959,7 +961,7 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         table_all[table_all["field_code"] == field_code]
         if not table_all.empty else table_all
     )
-    pending = db.list_proposals(year, field_code=field_code, status=db.PENDING)
+    pending = mdb.list_proposals(year, field_code=field_code, status=mdb.PENDING)
 
     counts = subject["characterization"].value_counts() if not subject.empty else {}
     col_a, col_b, col_c, col_d = st.columns(4)
@@ -1039,10 +1041,10 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
 
     # The projected year-wide table and the baseline both feed the two sections
     # below; computed once rather than per section.
-    projected_all = db.working_electors(
+    projected_all = mdb.working_electors(
         year, include_pending=True, blocked_ids=blocked
     )
-    baseline = db.load_external_electors(state["baseline_year"])
+    baseline = mdb.load_external_electors(state["baseline_year"])
 
     st.divider()
     st.subheader("Νέοι εκλέκτορες σε όλα τα γνωστικά αντικείμενα")
@@ -1061,7 +1063,7 @@ def render(*, year: int, baseline_year: int, registry: pd.DataFrame,
         year,
         projected_all,
         antikeimena, people, fold, registry_by_id, locked,
-        db.auto_removals(year, blocked, include_pending=True),
+        mdb.auto_removals(year, blocked, include_pending=True),
         changes,
         baseline,
     )

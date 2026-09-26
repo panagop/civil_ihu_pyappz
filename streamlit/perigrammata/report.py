@@ -31,9 +31,9 @@ from docx.shared import Cm, Pt
 from docxcompose.composer import Composer
 from docxtpl import DocxTemplate
 
-from perigrammata_db import CONTENT_COLUMNS, INTEGER_COLUMNS, NUMERIC_COLUMNS
+from perigrammata.data import CONTENT_COLUMNS, INTEGER_COLUMNS, NUMERIC_COLUMNS
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = {
     "gr": ROOT / "files" / "perigrammata-template-gr.docx",
     "eng": ROOT / "files" / "perigrammata-template-eng.docx",

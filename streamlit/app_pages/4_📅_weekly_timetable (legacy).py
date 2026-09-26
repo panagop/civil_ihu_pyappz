@@ -2,12 +2,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-import streamlit as st
 from streamlit_calendar import calendar
-
 from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS
 from utils.timetable_data import load_data
 from utils.timetable_export import create_weekly_timetable_document
+
+import streamlit as st
 
 st.set_page_config(
     layout="wide",
@@ -15,7 +15,7 @@ st.set_page_config(
     page_icon="📅",
 )
 
-from branding import apply_branding  # noqa: E402
+from shared.branding import apply_branding  # noqa: E402
 
 apply_branding()
 

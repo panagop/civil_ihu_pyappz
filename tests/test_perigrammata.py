@@ -18,9 +18,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))
 
-import perigrammata_db as pdb  # noqa: E402
-import perigrammata_report as report  # noqa: E402
-import seed_perigrammata as seed  # noqa: E402
+from perigrammata import data as pdb  # noqa: E402
+from perigrammata import (
+    report,  # noqa: E402
+    seed,  # noqa: E402
+)
 
 
 @pytest.fixture(scope="module")
@@ -124,8 +126,9 @@ def test_full_report_merges_every_course(courses_2025):
 
 
 def test_changes_report_survives_an_empty_period():
-    import pandas as pd
     from datetime import datetime
+
+    import pandas as pd
 
     data = report.build_changes_report(
         pd.DataFrame(), datetime(2026, 1, 1), datetime(2026, 12, 31), curriculum=2025

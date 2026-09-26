@@ -113,8 +113,8 @@ def _add_table(document: Document, frame, columns: list[str]):
 
 
 def _repeat_header_element():
-    from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
 
     element = OxmlElement("w:tblHeader")
     element.set(qn("w:val"), "true")

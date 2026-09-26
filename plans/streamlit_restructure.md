@@ -1,6 +1,6 @@
 # Restructure `streamlit/` into feature packages
 
-Status: **proposal, not started** (2026-09-27). Nothing changes for users.
+Status: **done on branch `restructure-streamlit`** (2026-09-27). Nothing changes for users.
 
 ## Why
 

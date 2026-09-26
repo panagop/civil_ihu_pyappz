@@ -22,9 +22,8 @@ availability check.
 from __future__ import annotations
 
 import pandas as pd
+from shared import database as db
 from sqlalchemy import text
-
-import db
 
 YEARS_TABLE = "eudoxus_years"
 COURSES_TABLE = "eudoxus_courses"

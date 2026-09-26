@@ -27,7 +27,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import Engine, text
 
-from eudoxus_db import (
+from eudoxus.data import (
     BOOKS_TABLE,
     COURSES_TABLE,
     LOCKED,
@@ -39,7 +39,7 @@ from eudoxus_db import (
     year_label,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 EUDOXUS_DIR = ROOT / "files" / "eudoxus"
 
 # The academic year is read out of the filename rather than from a fixed

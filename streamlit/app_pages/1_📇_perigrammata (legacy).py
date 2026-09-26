@@ -1,19 +1,20 @@
-﻿import sys
+﻿import io
+import sys
 from pathlib import Path
 
-import streamlit as st
 import pandas as pd
-from docxtpl import DocxTemplate
-import io
 import requests
+from docxtpl import DocxTemplate
+
+import streamlit as st
 
 st.set_page_config(
     layout="wide",
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from auth import require_ihu_login  # noqa: E402
-from branding import apply_branding  # noqa: E402
+from shared.auth import require_ihu_login  # noqa: E402
+from shared.branding import apply_branding  # noqa: E402
 
 require_ihu_login()
 apply_branding()
@@ -58,7 +59,7 @@ def replace_none_with_empty_str(some_dict: dict[str, object]) -> dict[str, objec
     return {k: ('' if v is None else v) for k, v in some_dict.items()}
 
 
-from settings import require_secret  # noqa: E402
+from shared.settings import require_secret  # noqa: E402
 
 # Google Sheets ID: secrets.toml locally / on Streamlit Cloud, env var on Railway
 gsheet_perigrammata_id = require_secret('gsheet_perigrammata_id')

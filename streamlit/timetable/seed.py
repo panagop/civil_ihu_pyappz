@@ -28,10 +28,10 @@ import re
 from pathlib import Path
 
 import pandas as pd
+from perigrammata.data import COURSES_TABLE as PERIGRAMMATA_TABLE
 from sqlalchemy import Engine, text
 
-from perigrammata_db import COURSES_TABLE as PERIGRAMMATA_TABLE
-from timetable_db import (
+from timetable.data import (
     CLASS_INSTRUCTORS_TABLE,
     CLASS_ROOMS_TABLE,
     CLASSES_TABLE,
@@ -45,7 +45,7 @@ from timetable_db import (
     period_for,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 TIMETABLES_DIR = ROOT / "files" / "timetables"
 STAFF_CSV = TIMETABLES_DIR / "staff.csv"
 ROOMS_CSV = TIMETABLES_DIR / "rooms.csv"

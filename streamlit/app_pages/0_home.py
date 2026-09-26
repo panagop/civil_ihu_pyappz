@@ -3,16 +3,16 @@
 Declared as the default page in ``home.py``, so it answers the app's root URL.
 """
 
-import streamlit as st
-
-from auth import render_login_block
-from branding import (
+from shared.auth import render_login_block
+from shared.branding import (
     DEPARTMENT_NAME,
     UNIVERSITY_LOGO,
     UNIVERSITY_NAME,
     UNIVERSITY_URL,
     apply_branding,
 )
+
+import streamlit as st
 
 apply_branding()
 
@@ -87,7 +87,7 @@ st.caption(
 # start and the database is reachable only from inside Railway. Streamlit
 # streams the page top to bottom, so everything above is already on screen
 # while this runs.
-import db  # noqa: E402
+from shared import database as db  # noqa: E402
 
 if db.is_available():
     st.sidebar.caption(db.bootstrap())

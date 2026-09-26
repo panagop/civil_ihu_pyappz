@@ -52,10 +52,9 @@ import re
 from itertools import combinations
 
 import pandas as pd
+from perigrammata.data import COURSES_TABLE as PERIGRAMMATA_TABLE
+from shared import database as db
 from sqlalchemy import text
-
-import db
-from perigrammata_db import COURSES_TABLE as PERIGRAMMATA_TABLE
 
 STAFF_TABLE = "timetable_staff"
 STAFF_TERMS_TABLE = "timetable_staff_terms"
@@ -236,7 +235,7 @@ CREATE TABLE IF NOT EXISTS {SNAPSHOT_CLASSES_TABLE} (
     PRIMARY KEY (snapshot_id, source_class_id)
 );
 
--- Migrations. Here rather than in db.MIGRATIONS_SQL, which runs before this
+-- Migrations. Here rather than in mitroa.data.MIGRATIONS_SQL, which runs before this
 -- schema: on a fresh database the table would not exist yet.
 -- 2026-09-16: a class is a course code; the programme stamp is gone.
 ALTER TABLE {CLASSES_TABLE} DROP COLUMN IF EXISTS curriculum;

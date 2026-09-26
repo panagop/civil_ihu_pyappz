@@ -16,10 +16,10 @@ from sqlalchemy import text as sa_text
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "streamlit"))
 
-import db  # noqa: E402
-import seed_timetable as seed  # noqa: E402
-import timetable_db as tdb  # noqa: E402
-from settings import get_secret  # noqa: E402
+from shared import database as db  # noqa: E402
+from shared.settings import get_secret  # noqa: E402
+from timetable import data as tdb  # noqa: E402
+from timetable import seed  # noqa: E402
 
 WORKBOOK = seed.WORKBOOKS[2025]
 
@@ -573,13 +573,13 @@ def test_curriculum_column_is_dropped_on_start(database):
 
 def test_page_toggle_offers_every_semester(database, monkeypatch):
     """A coordinator on an open term: the toggle widens the course list."""
-    import auth
+    from shared import auth
     from streamlit.testing.v1 import AppTest
 
     if not tdb.open_terms():
         assert tdb.open_term(2026, tdb.SPRING, 2025, tdb.SPRING, "c@ihu.gr") == ""
     monkeypatch.setattr(auth, "is_authorized", lambda: True)
-    monkeypatch.setattr(db, "is_coordinator", lambda email: True)
+    monkeypatch.setattr(auth, "is_coordinator", lambda email: True)
 
     page = ROOT / "streamlit" / "app_pages" / "8_📅_weekly_timetable.py"
     app = AppTest.from_file(str(page), default_timeout=300)
@@ -598,7 +598,7 @@ def test_page_toggle_offers_every_semester(database, monkeypatch):
 def test_page_versions_section(database, monkeypatch):
     """A coordinator on an open term with two versions: the section renders,
     compares, and switching the comparison does not raise."""
-    import auth
+    from shared import auth
     from streamlit.testing.v1 import AppTest
 
     if not tdb.open_terms():
@@ -608,7 +608,7 @@ def test_page_versions_section(database, monkeypatch):
         if name not in set(tdb.list_snapshots(year, period)["name"]):
             assert tdb.save_snapshot(year, period, name, None, "c@ihu.gr") == ""
     monkeypatch.setattr(auth, "is_authorized", lambda: True)
-    monkeypatch.setattr(db, "is_coordinator", lambda email: True)
+    monkeypatch.setattr(auth, "is_coordinator", lambda email: True)
 
     page = ROOT / "streamlit" / "app_pages" / "8_📅_weekly_timetable.py"
     app = AppTest.from_file(str(page), default_timeout=300)

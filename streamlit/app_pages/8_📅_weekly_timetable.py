@@ -24,8 +24,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-import streamlit as st
 from streamlit_calendar import calendar
+
+import streamlit as st
 
 st.set_page_config(
     layout="wide",
@@ -34,10 +35,10 @@ st.set_page_config(
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import db  # noqa: E402
-import timetable_db as tdb  # noqa: E402
-from auth import is_authorized  # noqa: E402
-from branding import apply_branding  # noqa: E402
+from shared import database as db  # noqa: E402
+from shared.auth import is_authorized, is_coordinator  # noqa: E402
+from shared.branding import apply_branding  # noqa: E402
+from timetable import data as tdb  # noqa: E402
 from utils.colors import DEFAULT_SEMESTER_COLOR, SEMESTER_COLORS  # noqa: E402
 from utils.timetable_export import create_weekly_timetable_document  # noqa: E402
 
@@ -60,7 +61,7 @@ if not terms:
     st.stop()
 
 user_email = getattr(st.user, "email", "") or ""
-coordinator = is_authorized() and db.is_coordinator(user_email)
+coordinator = is_authorized() and is_coordinator(user_email)
 open_list = tdb.open_terms()
 open_term = open_list[0] if open_list else None
 

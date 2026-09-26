@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import Engine, text
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BY_YEAR_DIR = ROOT / "files" / "mitroa" / "mitroa_by_year"
 
 HEADER_ROW = 8  # 0-based row holding the α/α ... Αιτιολόγηση συνάφειας header

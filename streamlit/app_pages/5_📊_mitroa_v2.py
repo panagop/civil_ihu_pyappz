@@ -5,6 +5,7 @@ import unicodedata
 from pathlib import Path
 
 import pandas as pd
+
 import streamlit as st
 
 st.set_page_config(
@@ -13,12 +14,13 @@ st.set_page_config(
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import db  # noqa: E402
-from auth import require_ihu_login  # noqa: E402
-from branding import apply_branding  # noqa: E402
-import external_table  # noqa: E402
-import proposals_ui  # noqa: E402
-from external_report import build_report  # noqa: E402
+from mitroa import data as mdb  # noqa: E402
+from mitroa import table as external_table  # noqa: E402
+from mitroa import ui as proposals_ui  # noqa: E402
+from mitroa.report import build_report  # noqa: E402
+from shared import database as db  # noqa: E402
+from shared.auth import require_ihu_login  # noqa: E402
+from shared.branding import apply_branding  # noqa: E402
 
 require_ihu_login()
 apply_branding()
@@ -190,12 +192,12 @@ def load_external_from_db(year: int) -> dict[str, dict]:
     Electors no longer in that export are kept, with their columns blank —
     dropping them would silently shrink a historical table.
     """
-    decisions = db.load_external_electors(year)
+    decisions = mdb.load_external_electors(year)
     if decisions.empty:
         return {}
 
     subjects = load_antikeimena().set_index("Code")
-    registry_path = db.registry_file_for_year(year)
+    registry_path = mdb.registry_file_for_year(year)
     people = external_table.prepare_registry(
         load_professors(str(registry_path)) if registry_path else None
     )
@@ -538,7 +540,7 @@ with tab_antikeimena:
 
 with tab_external:
     external_files = list_external_files()
-    db_years = db.stored_years()
+    db_years = mdb.stored_years()
 
     # Database first, so it is the default: from 2026 on it is where the year
     # lives, and the workbooks are only the historical record.
@@ -569,7 +571,7 @@ with tab_external:
                 "Έτος", db_years, key="external_year_db", format_func=str
             )
             workbook = load_external_from_db(year)
-            registry_path = db.registry_file_for_year(year)
+            registry_path = mdb.registry_file_for_year(year)
             origin = (
                 f"βάση δεδομένων · στοιχεία εκλεκτόρων από `{registry_path.name}`"
                 if registry_path
@@ -890,7 +892,7 @@ with tab_keywords:
 
 
 with tab_proposals:
-    registry_path = db.registry_file_for_year(WORKING_YEAR)
+    registry_path = mdb.registry_file_for_year(WORKING_YEAR)
     if registry_path is None:
         st.error(
             f"Δεν έχει οριστεί μητρώο για το {WORKING_YEAR} στο "
@@ -903,7 +905,7 @@ with tab_proposals:
             f"Μητρώο αναφοράς: `{registry_path.name}` · "
             f"στήλη κωλύματος: {', '.join(f'«{c}»' for c in blocking_now) or '—'}"
         )
-        baseline_path = db.registry_file_for_year(BASELINE_YEAR)
+        baseline_path = mdb.registry_file_for_year(BASELINE_YEAR)
         proposals_ui.render(
             year=WORKING_YEAR,
             baseline_year=BASELINE_YEAR,

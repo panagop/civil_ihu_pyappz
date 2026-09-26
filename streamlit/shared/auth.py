@@ -12,8 +12,7 @@ because Streamlit's OIDC callback always returns the user to the app root.
 from __future__ import annotations
 
 import streamlit as st
-
-from settings import get_secret_list
+from shared.settings import get_secret_list
 
 ALLOWED_EMAIL_SUFFIX = "@ihu.gr"
 
@@ -136,3 +135,17 @@ def _render_sidebar_user(user, email: str) -> None:
         st.caption(email)
         if st.button("Αποσύνδεση", key="_auth_sidebar_logout"):
             st.logout()
+
+
+def is_coordinator(email: str | None) -> bool:
+    """True for the people who may decide proposals and lock a year.
+
+    Kept in a `coordinator_emails` setting rather than a users table: with two
+    roles and a handful of people a table would need an admin screen to manage
+    and would still need a way to appoint the first admin.
+    """
+    if not email:
+        return False
+    return email.strip().lower() in {
+        item.lower() for item in get_secret_list("coordinator_emails")
+    }

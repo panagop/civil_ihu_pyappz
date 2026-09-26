@@ -1,18 +1,8 @@
-"""Postgres access for the μητρώα tables.
+"""The μητρώα tables: external electors, the year under preparation, proposals.
 
-Also the single place a connection is made, so the περιγράμματα schema
-(:mod:`perigrammata_db`) and the Εύδοξος one (:mod:`eudoxus_db`) are installed
-and seeded from here too — see :func:`get_engine` and :func:`bootstrap`.
-
-The database lives on Railway and is reachable **only from inside Railway**
-(no public TCP proxy — see CLAUDE.md, "Database"). Locally and on Streamlit
-Cloud there is no ``DATABASE_URL``, so :func:`get_engine` returns ``None`` and
-every caller must degrade gracefully rather than crash: the file-backed tabs of
-page 5 keep working everywhere, only the database-backed ones go quiet.
-
-Because nothing outside Railway can reach the database, the schema and the
-historical 2025 data are installed by the app itself on first start — see
-:func:`bootstrap`. Both steps are idempotent.
+Split out of the former ``db.py`` (2026-09-27); the engine it runs on lives in
+:mod:`shared.database`, which also installs this module's schema — see
+:func:`shared.database.get_engine` for why the order matters.
 """
 
 from __future__ import annotations
@@ -25,14 +15,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import streamlit as st
-from sqlalchemy import Connection, Engine, create_engine, text
-
-from settings import get_secret, get_secret_list
+from shared.database import get_engine
+from sqlalchemy import Connection, text
 
 CHARACTERIZATIONS = ("ΙΔΙΟΥ", "ΣΥΝΑΦΟΥΣ")
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PROFESSORS_DIR = ROOT / "files" / "mitroa" / "professors_tables"
 # Which ΑΠΕΛΛΑ export a stored year joins against. Kept as a file rather than a
 # table because it must also resolve where there is no database (locally, on
@@ -179,60 +167,6 @@ ALTER TABLE mitroa_proposals ADD CONSTRAINT mitroa_proposals_needs_reasoning CHE
 """
 
 
-@st.cache_resource
-def get_engine() -> Engine | None:
-    """SQLAlchemy engine, or None when no database is configured.
-
-    ``pool_pre_ping`` matters here: Railway recycles idle connections, and a
-    Streamlit process can sit untouched for hours between visitors.
-    """
-    url = get_secret("DATABASE_URL")
-    if not url:
-        return None
-    # Railway hands out a plain postgresql:// URL; SQLAlchemy 2 needs the
-    # driver spelled out to pick psycopg 3 over the (absent) psycopg2.
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    elif url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql+psycopg://", 1)
-    engine = create_engine(url, pool_pre_ping=True)
-
-    # The schema is installed here rather than in bootstrap() because Streamlit
-    # runs only the page you actually open: land straight on page 5 and home.py
-    # never executes. A migration that depends on the landing page is a
-    # migration that silently does not happen. This function is cached, so the
-    # DDL runs once per process, and it is cheap and idempotent.
-    try:
-        # Imported here, not at module level: perigrammata_db imports this
-        # module for the engine, so a top-level import would be circular.
-        from eudoxus_db import SCHEMA_SQL as EUDOXUS_SCHEMA_SQL
-        from perigrammata_db import SCHEMA_SQL as PERIGRAMMATA_SCHEMA_SQL
-        from timetable_db import SCHEMA_SQL as TIMETABLE_SCHEMA_SQL
-
-        with engine.begin() as conn:
-            dropped = _drop_committed_backup_copies(conn)
-            renamed = _rename_legacy_tables(conn)
-            conn.execute(text(SCHEMA_SQL))
-            conn.execute(text(MIGRATIONS_SQL))
-            conn.execute(text(PERIGRAMMATA_SCHEMA_SQL))
-            conn.execute(text(EUDOXUS_SCHEMA_SQL))
-            conn.execute(text(TIMETABLE_SCHEMA_SQL))
-        if dropped:
-            print(
-                "[db.get_engine] Διαγράφηκαν αντίγραφα ασφαλείας που υπάρχουν "
-                "πλέον στο αποθετήριο: " + ", ".join(dropped),
-                flush=True,
-            )
-        if renamed:
-            print(
-                "[db.get_engine] Μετονομάστηκαν πίνακες: " + ", ".join(renamed),
-                flush=True,
-            )
-    except Exception as exc:  # noqa: BLE001 - reported, not raised
-        print(f"[db.get_engine] Αποτυχία εφαρμογής σχήματος: {exc}", flush=True)
-    return engine
-
-
 def _rename_legacy_tables(conn: Connection) -> list[str]:
     """Bring a pre-2026-09-15 installation to the ``mitroa_`` names.
 
@@ -372,54 +306,6 @@ def backup_archive() -> tuple[str, bytes]:
     return f"mitroa_db_{stamp}.zip", buffer.getvalue()
 
 
-def is_available() -> bool:
-    return get_engine() is not None
-
-
-@st.cache_resource
-def bootstrap() -> str:
-    """Load the historical years. Runs once per process, from home.py.
-
-    The schema itself is installed by :func:`get_engine`; only the data seeding
-    lives here, because it is slow and needed by nothing until a page asks for a
-    stored year. Never raises: a database problem must not take down the
-    file-backed pages.
-    """
-    engine = get_engine()
-    if engine is None:
-        return "Χωρίς βάση δεδομένων (δεν έχει οριστεί DATABASE_URL)."
-    try:
-        from seed_eudoxus import seed_eudoxus
-        from seed_external import seed_historical_years
-        from seed_perigrammata import seed_perigrammata
-        from seed_timetable import seed_timetable
-
-        status = seed_historical_years(engine)
-        status = f"{status} · {seed_perigrammata(engine)}"
-        status = f"{status} · {seed_eudoxus(engine)}"
-        # After the περιγράμματα: the timetable resolves its course codes there.
-        status = f"{status} · {seed_timetable(engine)}"
-        # Report the tables too: without SSH into the container, and with no
-        # public proxy to the database, the log line is the only way to confirm
-        # a schema change actually landed.
-        with engine.connect() as conn:
-            tables = sorted(
-                row[0]
-                for row in conn.execute(
-                    text(
-                        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-                    )
-                )
-            )
-        status = f"{status} · πίνακες: {', '.join(tables) or '(κανένας)'}"
-    except Exception as exc:  # noqa: BLE001 - reported, not raised
-        status = f"Σφάλμα βάσης: {exc}"
-    # Also to stdout: the database is unreachable from outside Railway, so the
-    # deployment logs are the only place this can be checked.
-    print(f"[db.bootstrap] {status}", flush=True)
-    return status
-
-
 def load_external_electors(year: int) -> pd.DataFrame:
     """The stored rows for one year, ordered ΙΔΙΟΥ first then by elector id."""
     engine = get_engine()
@@ -460,25 +346,6 @@ def stored_years() -> list[int]:
             )
         )
         return [row[0] for row in rows]
-
-
-# --------------------------------------------------------------------------
-# Roles
-# --------------------------------------------------------------------------
-
-def is_coordinator(email: str | None) -> bool:
-    """True for the people who may decide proposals and lock a year.
-
-    Kept in a `coordinator_emails` setting rather than a users table: with two
-    roles and a handful of people a table would need an admin screen to manage
-    and would still need a way to appoint the first admin.
-    """
-    if not email:
-        return False
-    return email.strip().lower() in {
-        item.lower() for item in get_secret_list("coordinator_emails")
-    }
-
 
 # --------------------------------------------------------------------------
 # The year under preparation
