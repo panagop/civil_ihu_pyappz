@@ -13,6 +13,10 @@ year under preparation uses the current one.
 
 from __future__ import annotations
 
+import io
+import re
+import zipfile
+
 import pandas as pd
 
 ID_COL = "Κωδικός Χρήστη"
@@ -43,6 +47,13 @@ WORKBOOK_COLUMNS = [
     "Βαθμίδα",
     REASONING_COL,
 ]
+
+# The per-subject CSV layout (files/mitroa/csv_test/ holds a sample):
+# id, surname, 1 for ΙΔΙΟΥ / 0 for ΣΥΝΑΦΟΥΣ.
+CSV_HEADER = ["ΚΩΔΙΚΟΣ ΧΡΗΣΤΗ", "ΕΠΩΝΥΜΟ", "ΣΥΝΑΦΕΙΑ"]
+CSV_SYNAFEIA = {"ΙΔΙΟΥ": 1, "ΣΥΝΑΦΟΥΣ": 0}
+# Characters Windows refuses in a filename; subject titles carry ":" and "/"
+UNSAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
 
 
 def prepare_registry(registry: pd.DataFrame | None) -> pd.DataFrame:
@@ -89,3 +100,47 @@ def build(decisions: pd.DataFrame, people: pd.DataFrame, fold) -> pd.DataFrame:
 
     columns = [name for name in WORKBOOK_COLUMNS if name in merged.columns]
     return merged[columns].fillna("")
+
+
+def subject_csv(df: pd.DataFrame) -> bytes:
+    """One subject's table in the CSV layout: UTF-8 without BOM, CRLF, as the sample.
+
+    Rows keep the table's order. A χαρακτηρισμός other than ΙΔΙΟΥ / ΣΥΝΑΦΟΥΣ
+    raises rather than becoming a 0 nobody would notice.
+    """
+    synafeia = df[CHARAKTIRISMOS_COL].astype(str).str.strip().map(CSV_SYNAFEIA)
+    if synafeia.isna().any():
+        bad = sorted(set(df.loc[synafeia.isna(), CHARAKTIRISMOS_COL].astype(str)))
+        raise ValueError(f"άγνωστος χαρακτηρισμός: {', '.join(bad)}")
+    out = pd.DataFrame(
+        {
+            CSV_HEADER[0]: pd.to_numeric(df[ID_COL]).astype("int64"),
+            CSV_HEADER[1]: df["Επώνυμο"].astype(str).str.strip(),
+            CSV_HEADER[2]: synafeia.astype("int64"),
+        }
+    )
+    return out.to_csv(index=False, lineterminator="\r\n").encode("utf-8")
+
+
+def csv_filename(field: str) -> str:
+    """The subject title as a filename, with the characters Windows refuses replaced."""
+    name = UNSAFE_FILENAME_RE.sub("-", str(field)).strip().rstrip(".").strip()
+    return f"{name}.csv"
+
+
+def csv_archive(workbook: dict[str, dict]) -> bytes:
+    """Every subject of a year as ``<title>.csv``, zipped.
+
+    ``workbook`` is the structure the page builds from either source
+    ({sheet: {code, field, domain, df}}). Raises ValueError naming the subject
+    whose table cannot be expressed in the layout.
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for entry in sorted(workbook.values(), key=lambda e: str(e["code"])):
+            try:
+                content = subject_csv(entry["df"])
+            except (KeyError, ValueError) as exc:
+                raise ValueError(f"{entry['code']} — {entry['field']}: {exc}") from exc
+            archive.writestr(csv_filename(entry["field"]), content)
+    return buffer.getvalue()

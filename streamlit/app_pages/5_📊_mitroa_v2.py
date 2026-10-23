@@ -624,7 +624,7 @@ with tab_external:
 
         st.dataframe(df_ext, width="stretch", hide_index=True)
 
-        col_one, col_all = st.columns(2)
+        col_one, col_all, col_csv = st.columns(3)
         col_one.download_button(
             "Λήψη Excel (τρέχον αντικείμενο)",
             data=to_excel_bytes(df_ext),
@@ -632,6 +632,26 @@ with tab_external:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="external_download",
         )
+
+        # Built on every run rather than behind a button: 52 small CSVs take a
+        # few milliseconds, and building here lets a bad χαρακτηρισμός surface
+        # as an error — inside a deferred download it would fail unseen.
+        try:
+            csv_zip = external_table.csv_archive(workbook)
+        except ValueError as exc:
+            col_csv.error(f"Τα CSV δεν δημιουργήθηκαν: {exc}")
+        else:
+            col_csv.download_button(
+                "Λήψη CSV (όλα τα αντικείμενα, .zip)",
+                data=csv_zip,
+                file_name=f"external_{year}_csv.zip",
+                mime="application/zip",
+                key="external_csv_zip",
+                help=(
+                    "Ένα αρχείο ανά γνωστικό αντικείμενο: Κωδικός χρήστη, Επώνυμο, "
+                    "Συνάφεια (1 = ιδίου, 0 = συναφούς)."
+                ),
+            )
 
         # Built on demand rather than up front: 52 subjects take a few seconds
         # and most visits to this tab only want one of them.

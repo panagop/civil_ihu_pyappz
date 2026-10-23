@@ -276,6 +276,21 @@ begins, and add the new registry export to `registry_snapshots.csv`.
 
 Reads only local files — no secrets, no network.
 
+### CSV per subject (added 2026-10-23)
+
+The Εξωτερικοί εκλέκτορες tab downloads the selected year (either source) as a
+zip of one `<subject title>.csv` per γνωστικό αντικείμενο:
+`ΚΩΔΙΚΟΣ ΧΡΗΣΤΗ,ΕΠΩΝΥΜΟ,ΣΥΝΑΦΕΙΑ`, 1 = ΙΔΙΟΥ, 0 = ΣΥΝΑΦΟΥΣ, rows in the table's
+order. The model is `files/mitroa/csv_test/Θεμελιώσεις - Αντιστηρίξεις.csv`
+(the 2025 table of 575) — **UTF-8 without BOM, CRLF**, and the generated file
+for 2025/575 is byte-identical to it; `tests/test_mitroa_csv.py` holds that.
+
+- `mitroa.table.csv_archive` builds it; titles lose `\ / : * ? " < > |` and
+  trailing dots (570 carries `:` and a final `.`, 606 `Η/Υ`).
+- Built on every run, not passed to `download_button` as a callable: a callable
+  runs on another thread, so an unknown χαρακτηρισμός would fail unseen there.
+  It raises instead of exporting a 0, and the tab shows the error.
+
 ### Registry data files
 
 - `files/mitroa/professors_tables/professors_export_<YYYYMMDD>.parquet` — annual
